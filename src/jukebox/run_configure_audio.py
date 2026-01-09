@@ -356,7 +356,7 @@ def configure_jukebox(pulse_config: PaConfigClass):
 def welcome(pulse_config: PaConfigClass):
     msg_highlight('The Jukebox audio output configuration tool')
     print("Please note:")
-    print("  - This two does two steps:")
+    print("  - This tool works in two steps:")
     print("       1) Setup up PulseAudio signal processing chain")
     print("       2) Register audio outputs with Jukebox")
     print(" - Read the documentation page 'Audio Configuration'")
