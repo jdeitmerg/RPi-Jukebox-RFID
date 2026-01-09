@@ -106,19 +106,6 @@ If you need Wifi, add the information now
 
 </details>
 
-#### Workaround for 64-bit Kernels (Pi 4 and newer)
-
-<details>
-
-The installation process checks if a 32-bit OS is running, as 64-bit is currently not supported.
-This check also fails if the kernel is running in 64-bit mode. This is the default for Raspberry Pi models 4 and newer.
-
-To be able to run the installation, you have to switch to the 32-bit mode by modifying the `config.txt` and add/change the line `arm_64bit=0`.
-Up to Bullseye, the `config.txt` file is located at `/boot/`. Since Bookworm, the location changed to `/boot/firmware/` ([see here](https://www.raspberrypi.com/documentation/computers/config_txt.html)).
-
-Reboot before you proceed.
-</details>
-
 ## Install Phoniebox software
 
 Choose a version, run the corresponding install command in your SSH terminal and follow the instructions.
