@@ -2,10 +2,7 @@
 /shared/audiofolders/*
 /shared/logs/*
 /shared/playlists/*
-/shared/settings/*
 /shared/logs/*.log*
-/shared/*.*
-/shared/*
 /src/webapp/public/cover-cache/*.*
 
 # Application

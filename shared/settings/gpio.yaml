@@ -1,0 +1,45 @@
+pin_factory:
+  type: rpigpio.RPiGPIOFactory
+input_devices:
+  BtnPlayPause:
+    type: Button
+    kwargs:
+      pin: GPIO6
+    actions:
+      on_press:
+        alias: toggle
+  BtnVolPlus:
+    type: Button
+    kwargs:
+      pin: GPIO7
+      hold_time: 0.75
+      hold_repeat: True
+    actions:
+      on_press:
+        alias: change_volume
+        args: +5
+  BtnVolMinus:
+    type: Button
+    kwargs:
+      pin: GPIO5
+      hold_time: 0.75
+      hold_repeat: True
+    actions:
+      on_press:
+        alias: change_volume
+        args: -5
+  BtnPower:
+    type: LongPressButton
+    kwargs:
+      pin: GPIO4
+      hold_time: 4
+    actions:
+      on_press:
+        alias: shutdown
+  BtnHeadphones: # Named BTN_BLUETOOTH in schematic
+    type: Button
+    kwargs:
+      pin: GPIO13
+    actions:
+      on_press:
+        alias: toggle_output

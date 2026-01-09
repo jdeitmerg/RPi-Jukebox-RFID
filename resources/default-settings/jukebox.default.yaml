@@ -26,7 +26,7 @@ pulse:
   startup_volume: 40
   # Automatically toggle output between primary and secondary audio output
   # when a device connects (Note: So far, toggle happens when ANY device connects)
-  toggle_on_connect: true
+  toggle_on_connect: false
   # Limit maximum volume range to XX % - can be changed through the UI (for temporary use)
   soft_max_volume: 70
   # Run the audio configuration tool to configure the pulseaudio sinks
@@ -48,17 +48,13 @@ pulse:
   #                 i.e. make both channels equally load out 100 % and make sure it never gets too loud
   outputs:
     primary:
-      alias: Built-in speakers
+      alias: Speakers
       volume_limit: 100
-      soft_max_volume: 100
-      # Leave pulse_sink_name empty for first start-up (will be filled with systems default sink)
-      # pulse_sink_name: alsa_output.pci-0000_00_1f.3.analog-stereo
+      pulse_sink_name: alsa_output.platform-soc_sound.stereo-fallback
     secondary:
-      alias: Bluetooth headset
+      alias: Bluetooth Headset
       volume_limit: 100
-      soft_max_volume: 100
-      # Leave pulse_sink_name unfilled to disable secondary output
-      # pulse_sink_name: bluez_sink.C4_FB_20_63_CO_FE.a2dp_sink
+      pulse_sink_name: headset_pulse_sink_placeholder # "headset_pulse_sink_placeholder" is replaced during bulk-flashing by customize_jukebox_conf.sh
 jingle:
    # Supported file formats as jingles: *.wav and *.mp3. Note that *.wav is faster!
   startup_sound: ../../resources/audio/startupsound.wav
@@ -105,13 +101,13 @@ rfid:
   reader_config: ../../shared/settings/rfid.yaml
   card_database: ../../shared/settings/cards.yaml
 gpioz:
-  enable: false
+  enable: true
   config_file: ../../shared/settings/gpio.yaml
 timers:
   idle_shutdown:
     # If you want the box to shutdown on inactivity automatically, configure timeout_sec with a number of seconds (at least 60).
     # Inactivity is defined as: no music playing, no active SSH sessions, no changes in configs or audio content.
-    timeout_sec: 0
+    timeout_sec: 1200
   # These timers are always disabled after start
   # The following values only give the default values.
   # These can be changed when enabling the respective timer on a case-by-case basis w/o saving
@@ -149,11 +145,11 @@ speaking_text:
   # Must be one of: normal, fast, slow
   speed: normal
   # Whether you want to read punctuation or not
-  speak_punct: False
+  speak_punct: false
   # Must be one of: female, male, croak, whisper
   voice: female
 sync_rfidcards:
-  enable: false
+  enable: true
   config_file: ../../shared/settings/sync_rfidcards.yaml
 webapp:
   coverart_cache_path: ../../src/webapp/build/cover-cache

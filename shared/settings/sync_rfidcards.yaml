@@ -1,0 +1,8 @@
+sync_rfidcards:
+  on_rfid_scan_enabled: false
+  mode: mount
+  credentials:
+    server: '10.20.30.10'
+    port: 80 # Only used to check connectivity in 'mount' mode
+    timeout: 1
+    path: '/mnt/phoniebox-share'

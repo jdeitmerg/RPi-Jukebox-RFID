@@ -149,3 +149,5 @@ load-module module-filter-apply
 ### Configuration by Jukebox's Tool may come below
 # Run ./installation/components/setup_configure_audio.sh for configuration
 
+# The default sink. Note that is may still be changed at run time by various PulseAudio rules e.g. when connecting a USB Sound Card
+set-default-sink alsa_output.platform-soc_sound.stereo-fallback
