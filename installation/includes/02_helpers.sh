@@ -148,7 +148,7 @@ _get_service_enablement() {
         exit_on_error "ERROR: at least one parameter value is missing!"
     fi
 
-    local actual_enablement=$(systemctl is-enabled ${option}${service} 2>/dev/null)
+    local actual_enablement=$(sudo -u "${CURRENT_USER}" systemctl is-enabled ${option}${service} 2>/dev/null)
 
     echo "$actual_enablement"
 }

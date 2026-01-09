@@ -20,9 +20,9 @@ GIT_URL="https://github.com/${GIT_USER}/${GIT_REPO_NAME}"
 echo GIT_BRANCH $GIT_BRANCH
 echo GIT_URL $GIT_URL
 
-CURRENT_USER="${SUDO_USER:-$(whoami)}"
-CURRENT_USER_GROUP=$(id -gn "$CURRENT_USER")
-HOME_PATH=$(getent passwd "$CURRENT_USER" | cut -d: -f6)
+CURRENT_USER=pi
+CURRENT_USER_GROUP=pi
+HOME_PATH=/home/pi
 
 INSTALLATION_PATH="${HOME_PATH}/${GIT_REPO_NAME}"
 INSTALL_ID=$(date +%s)
@@ -98,30 +98,6 @@ files and run the installation on a fresh image."
     fi
 }
 
-_download_jukebox_source() {
-  log "#########################################################"
-  print_c "Downloading Phoniebox software from Github ..."
-  print_lc "Download Source: ${GIT_URL}/${GIT_BRANCH}"
-
-  cd "${HOME_PATH}" || exit_on_error "ERROR: Changing to home dir failed."
-  wget -qO- "${GIT_URL}/tarball/${GIT_BRANCH}" | tar xz
-  # Use case insensitive search/sed because user names in Git Hub are case insensitive
-  local git_repo_download=$(find . -maxdepth 1 -type d -iname "${GIT_USER}-${GIT_REPO_NAME}-*")
-  log "GIT REPO DOWNLOAD = $git_repo_download"
-  GIT_HASH=$(echo "$git_repo_download" | sed -rn "s/.*${GIT_USER}-${GIT_REPO_NAME}-([0-9a-fA-F]+)/\1/ip")
-  # Save the git hash for this particular download for later git repo initialization
-  log "GIT HASH = $GIT_HASH"
-  if [[ -z "${git_repo_download}" ]]; then
-    exit_on_error "ERROR: Couldn't find git download."
-  fi
-  if [[ -z "${GIT_HASH}" ]]; then
-    exit_on_error "ERROR: Couldn't determine git hash from download."
-  fi
-  mv "$git_repo_download" "$GIT_REPO_NAME" || exit_on_error "ERROR: Can't overwrite existing installation."
-  log "\nDONE: Downloading Phoniebox software from Github"
-  log "#########################################################"
-}
-
 _load_sources() {
     # Load / Source dependencies
     for i in "${INSTALLATION_PATH}"/installation/includes/*; do
@@ -133,20 +109,22 @@ _load_sources() {
     done
 }
 
+# Make pip recover more quickly from broken connections that apparently are
+# caused by Docker NAT (+ chroot?). Otherwise a lot of time is spend moaning
+# about broken SSL on encountering EOF.
+export PIP_RETRIES=0
+
 ### SETUP LOGGING
 _setup_logging
 
 ### CHECK PREREQUISITE
-_check_existing_installation
 
 ### RUN INSTALLATION
 log "Current User: $CURRENT_USER"
 log "User home dir: $HOME_PATH"
 
-_download_jukebox_source
 cd "${INSTALLATION_PATH}" || exit_on_error "ERROR: Changing to install dir failed."
 _load_sources
 
-welcome
 run_with_timer install
 finish

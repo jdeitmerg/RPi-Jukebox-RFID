@@ -55,8 +55,8 @@ _jukebox_core_install_python_requirements() {
 
 _jukebox_core_configure_pulseaudio() {
   print_lc "  Copy PulseAudio configuration"
-  mkdir -p $(dirname "$JUKEBOX_PULSE_CONFIG")
-  cp -f "${INSTALLATION_PATH}/resources/default-settings/pulseaudio.default.pa" "${JUKEBOX_PULSE_CONFIG}"
+  sudo -u "${CURRENT_USER}"  mkdir -p $(dirname "$JUKEBOX_PULSE_CONFIG")
+  sudo -u "${CURRENT_USER}" cp -f "${INSTALLATION_PATH}/resources/default-settings/pulseaudio.default.pa" "${JUKEBOX_PULSE_CONFIG}"
 }
 
 _jukebox_core_build_libzmq_with_drafts() {
@@ -125,8 +125,13 @@ _jukebox_core_register_as_service() {
   sudo sed -i "s|%%INSTALLATION_PATH%%|${INSTALLATION_PATH}|g" "${JUKEBOX_SERVICE_NAME}"
   sudo chmod 644 "${JUKEBOX_SERVICE_NAME}"
 
-  systemctl --user daemon-reload
-  systemctl --user enable jukebox-daemon.service
+  sudo -u "${CURRENT_USER}" systemctl --user daemon-reload
+  sudo -u "${CURRENT_USER}" systemctl --user enable jukebox-daemon.service
+}
+
+_jukebox_core_set_owner() {
+  sudo chown -R $CURRENT_USER:$CURRENT_USER_GROUP "${JUKEBOX_PULSE_CONFIG}"
+  sudo chown -R $CURRENT_USER:$CURRENT_USER_GROUP "${SETTINGS_PATH}"
 }
 
 _jukebox_core_check() {
@@ -166,7 +171,7 @@ _jukebox_core_check() {
 
     verify_file_contains_string "${INSTALLATION_PATH}" "${JUKEBOX_SERVICE_NAME}"
 
-    verify_service_enablement jukebox-daemon.service enabled --user
+    verify_service_enablement jukebox-daemon.service enabled -M "${CURRENT_USER}"@ --user
 }
 
 _run_setup_jukebox_core() {
@@ -176,6 +181,7 @@ _run_setup_jukebox_core() {
     _jukebox_core_configure_pulseaudio
     _jukebox_core_install_settings
     _jukebox_core_register_as_service
+    _jukebox_core_set_owner
     _jukebox_core_check
 }
 

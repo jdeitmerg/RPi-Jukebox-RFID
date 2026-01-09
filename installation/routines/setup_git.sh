@@ -149,8 +149,6 @@ _git_repo_check() {
 _run_init_git_repo_from_tardir() {
     cd "${INSTALLATION_PATH}" || exit_on_error
     _git_install_os_dependencies
-    _git_convert_tardir_git_repo
-    _git_repo_check
 }
 
 init_git_repo_from_tardir() {

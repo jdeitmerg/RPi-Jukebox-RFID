@@ -15,19 +15,4 @@ After the reboot, you can access the Web App in your browser at
 http://${local_hostname}.local or http://${CURRENT_IP_ADDRESS}
 Don't forget to upload files.
 "
-print_c "Do you want to reboot now? [Y/n]"
-
-  read -r response
-  case "$response" in
-    [nN][oO]|[nN])
-      print_lc "Reboot aborted"
-      log "DONE: finish"
-      exit
-      ;;
-    *)
-      print_lc "Rebooting ..."
-      log "DONE: finish"
-      sudo reboot
-      ;;
-  esac
 }

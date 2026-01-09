@@ -34,10 +34,12 @@ _mpd_configure() {
   sed -i 's|%%JUKEBOX_AUDIOFOLDERS_PATH%%|'"$AUDIOFOLDERS_PATH"'|' "${MPD_CONF_PATH}"
   sed -i 's|%%JUKEBOX_PLAYLISTS_PATH%%|'"$PLAYLISTS_PATH"'|' "${MPD_CONF_PATH}"
 
+  sudo chown -R $CURRENT_USER:$CURRENT_USER_GROUP "${MPD_CONF_PATH}"
+
   # Prepare user-service MPD to be started at next boot
-  systemctl --user daemon-reload
-  systemctl --user enable mpd.socket
-  systemctl --user enable mpd.service
+  sudo -u "${CURRENT_USER}" systemctl --user daemon-reload
+  sudo -u "${CURRENT_USER}" systemctl --user enable mpd.socket
+  sudo -u "${CURRENT_USER}" systemctl --user enable mpd.service
 }
 
 _mpd_check() {

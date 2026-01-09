@@ -1,7 +1,8 @@
 install() {
-  clear_c
-  customize_options
-  clear_c
+  . ../includes/PhonieboxInstall.conf
+  if [ -f ../includes/PhonieboxInstall.overwrite.conf ]; then
+    . ../includes/PhonieboxInstall.overwrites.conf
+  fi
   show_slow_hardware_message
   set_raspi_config
   set_ssh_qos

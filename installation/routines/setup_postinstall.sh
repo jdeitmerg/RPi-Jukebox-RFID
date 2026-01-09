@@ -6,6 +6,8 @@ _setup_login_message() {
 
 _run_setup_postinstall() {
     _setup_login_message
+    chown -R pi:pi "${INSTALLATION_PATH}"
+    chown -R pi:pi /home/pi/.config
 }
 
 setup_postinstall() {

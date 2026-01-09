@@ -4,7 +4,7 @@ SYSTEMD_PATH="/etc/systemd/system"
 SYSTEMD_USR_PATH="/usr/lib/systemd/user"
 VIRTUAL_ENV="${INSTALLATION_PATH}/.venv"
 # Do not change this directory! It must match MPDs expectation where to find the user configuration
-MPD_CONF_PATH="${HOME}/.config/mpd/mpd.conf"
+MPD_CONF_PATH="${HOME_PATH}/.config/mpd/mpd.conf"
 
 # The default upstream user, release branch, and develop branch
 # These are used to prepare the repo for developers
