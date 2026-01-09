@@ -67,7 +67,7 @@ Each device instantiation must be uniquely named, here  ``TogglePlayback``. The 
 long as it is unique.
 
 The parameter ``type`` directly matches the GPIO input device class, in this case
-class `LED <components.gpio.gpioz.core.input_devices.Button>`. With ``kwargs`` you can set all the class initialization
+class `components.gpio.gpioz.core.input_devices.Button`. With ``kwargs`` you can set all the class initialization
 parameters, which relate directly to the class' initialization parameters.
 
 > [!IMPORTANT]
