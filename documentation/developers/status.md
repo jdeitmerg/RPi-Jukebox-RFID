@@ -200,6 +200,8 @@ Topics marked _in progress_ are already in the process of implementation by comm
 - [x] MQTT
 - [ ] Record and Playback using a Mic
 - [ ] Dot Matrix Displays
+- [x] Sync audio folders + card DB via SSH or local mount (e.g. samba)
+  - [x] Selective "RFID scan sync" or full sync
 
 ### Start-up stuff
 
