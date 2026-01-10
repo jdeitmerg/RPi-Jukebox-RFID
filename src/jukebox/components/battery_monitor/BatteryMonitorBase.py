@@ -92,9 +92,9 @@ class BattmonBase():
                        4000: 95,
                        4200: 100}
 
-        self.ok_voltage = 3400
-        self.warning_voltage = 3300
-        self.shutdown_voltage = 3000
+        self.ok_voltage = 3500
+        self.warning_voltage = 3400
+        self.shutdown_voltage = 3200
 
         self.last_sample_time = -5
         batt_voltage_mV = self.get_batt_voltage()
