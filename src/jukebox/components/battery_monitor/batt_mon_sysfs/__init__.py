@@ -40,10 +40,11 @@ class battmon_sysfs(BatteryMonitorBase.BattmonBase):
     """
 
     def __init__(self, cfg):
-        super().__init__(cfg, logger)
-        self.path = cfg.get('battmon', 'sysfs_voltage_path')
+        self.path = cfg.getn('battmon', 'sysfs_voltage_path')
         if not self.path:
             raise ValueError("No sysfs_voltage_path configured for battmon_sysfs")
+        # Calls init_batt_mon_hw, must happen after setting self.path
+        super().__init__(cfg, logger)
 
     def init_batt_mon_hw(self, num, denom):
         """Initialize battery monitor with scaling factor for scaling raw volatage readings to mV.

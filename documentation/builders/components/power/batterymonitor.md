@@ -56,7 +56,7 @@ The script in [src/jukebox/components/battery_monitor/batt_mon_i2c_ina219/\_\_in
 
 ## Battery Monitor based on sysfs reading
 
-The script in [src/jukebox/components/battery_monitor/batt_mon_sysfs/\_\_init\_\_.py](../../../../src/jukebox/components/battery_monitor/batt_mon_sysfs/__init__.py) is intended to read out the voltage of a battery via sysfs. This may be possible if your battery monitor or charger IC is set up in the Linux device tree. E.g. the kernel driver for TI's bq25890 exposes the voltage in mV here: `sys/class/power_supply/bq25890-charger-0/voltage_now`.
+The script in [src/jukebox/components/battery_monitor/batt_mon_sysfs/\_\_init\_\_.py](../../../../src/jukebox/components/battery_monitor/batt_mon_sysfs/__init__.py) is intended to read out the voltage of a battery via sysfs. This may be possible if your battery monitor or charger IC is set up in the Linux device tree. E.g. the kernel driver for TI's bq25890 exposes the voltage in mV here: `/sys/class/power_supply/bq25890-charger-0/voltage_now`.
 
 ## Configuration example
 
@@ -80,7 +80,7 @@ The battmon module needs further configuration:
 ```yaml
 battmon:
   scale_to_phy_num: 1
-  scale_to_phy_denom: 0
+  scale_to_phy_denom: 1
   warning_action:
   all_clear_action:
   sysfs_voltage_path:
