@@ -54,6 +54,10 @@ The script in [src/jukebox/components/battery_monitor/batt_mon_i2c_ina219/\_\_in
              ===                  ===             ===
 ```
 
+## Battery Monitor based on sysfs reading
+
+The script in [src/jukebox/components/battery_monitor/batt_mon_sysfs/\_\_init\_\_.py](../../../../src/jukebox/components/battery_monitor/batt_mon_sysfs/__init__.py) is intended to read out the voltage of a battery via sysfs. This may be possible if your battery monitor or charger IC is set up in the Linux device tree. E.g. the kernel driver for TI's bq25890 exposes the voltage in mV here: `sys/class/power_supply/bq25890-charger-0/voltage_now`.
+
 ## Configuration example
 
 The battery monitoring is configured in the jukebox.yml file.
@@ -69,6 +73,8 @@ modules:
     battmon: battery_monitor.batt_mon_i2c_ina219
 ```
 
+Replace `batt_mon_i2c_ina219` by `batt_mon_i2c_ads1015` or `batt_mon_sysfs` according to your hardware setup.
+
 The battmon module needs further configuration:
 
 ```yaml
@@ -77,6 +83,11 @@ battmon:
   scale_to_phy_denom: 0
   warning_action:
   all_clear_action:
+  sysfs_voltage_path:
 ```
 
-The setting "scale_to_phy_denom" does not influence the INA219. However, the scale can be adjusted to fit multiple LiIon cells.
+`scale_to_phy_num` and `scale_to_phy_denom` are used to scale the raw reading by the factor $\frac{\texttt{scale\_to\_phy\_num}}{\texttt{scale\_to\_phy\_denom}}$. The result is expected to be in mV and represents the voltage of a single cell. If have multiple cells in series, set the scaling factor accordingly.
+
+The setting `scale_to_phy_denom` has no effect for the INA219.
+
+The setting `sysfs_voltage_path` is only relevant for the `batt_mon_sysfs` battery monitor. It sets the sysfs path at which the raw battery voltage can be read.
