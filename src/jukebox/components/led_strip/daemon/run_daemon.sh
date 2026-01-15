@@ -9,4 +9,4 @@ touch $LOGFILE
 chmod 664 $LOGFILE
 
 . .venv/bin/activate
-python3 led_strip_daemon.py $@ > $LOGFILE 2>&1
+python3 led_strip_daemon.py $@ 2>&1 | tee $LOGFILE

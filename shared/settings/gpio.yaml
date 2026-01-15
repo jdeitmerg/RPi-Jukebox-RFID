@@ -12,7 +12,7 @@ input_devices:
     type: Button
     kwargs:
       pin: GPIO7
-      hold_time: 0.5
+      hold_time: 0.3
       hold_repeat: True
     actions:
       on_press:
@@ -22,7 +22,7 @@ input_devices:
     type: Button
     kwargs:
       pin: GPIO5
-      hold_time: 0.5
+      hold_time: 0.3
       hold_repeat: True
     actions:
       on_press:

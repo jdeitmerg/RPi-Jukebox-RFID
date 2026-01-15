@@ -34,19 +34,23 @@ class LedStripManager(threading.Thread):
         self.pin = pin
         self.brightness = brightness
         self.base_color = base_color
+        self.lock = threading.Lock()
+        self.socket = None
 
-        self._start_daemon()
-        # RPC Setup
-        self.context = zmq.Context()
-        for _ in range(20):
-            try:
-                self._socket_connect()
-                if self._poll_daemon():
-                    break
-            except Exception:
-                time.sleep(1)
-        else:
-            raise RuntimeError('LED Daemon did not start properly!')
+        with self.lock:
+            self._start_daemon()
+            # RPC Setup
+            self.context = zmq.Context()
+            for _ in range(20):
+                try:
+                    self._socket_connect()
+                    if self._poll_daemon():  # takes up to 1s
+                        break
+                except Exception:
+                    time.sleep(1)
+            else:
+                raise RuntimeError('LED Daemon did not start properly!')
+        logger.info('Connected to LED Strip Daemon')
 
         # State tracking
         self.current_state = PRIO_IDLE
@@ -65,7 +69,9 @@ class LedStripManager(threading.Thread):
                                               '--num-leds', str(self.num_leds),
                                               '--pin', str(self.pin),
                                               '--brightness', str(self.brightness),
-                                              '--base-color', ','.join(map(str, self.base_color))])
+                                              '--base-color', ','.join(map(str, self.base_color))],
+                                              stdout=subprocess.DEVNULL,  # Suppress output to avoid cluttering logs
+                                              stderr=subprocess.DEVNULL)
 
     def _poll_daemon(self):
         # Check if daemon is running
@@ -78,31 +84,27 @@ class LedStripManager(threading.Thread):
             return False
 
     def _socket_connect(self):
+        if self.socket:
+            self.socket.close()
         self.socket = self.context.socket(zmq.REQ)
+        logger.debug(f'Connecting to LED daemon socket at ipc://{SOCKET_PATH}...')
         self.socket.connect(f'ipc://{SOCKET_PATH}')
         self.socket.setsockopt(zmq.LINGER, 500)
         self.socket.setsockopt(zmq.RCVTIMEO, 1000)
 
     def _rpc_call(self, method, params=None):
-        try:
-            self.socket.send_string(json.dumps({'method': method, 'params': params or {}}))
-            self.socket.recv_string()  # Wait for ack
-        except Exception as e:
-            logger.error(f'Failed to call LED daemon: {e}')
-            # Reconnect on error
-            self.socket.close()
-            self._socket_connect()
-            assert self._poll_daemon(), 'Unable to reconnect to LED daemon!'
+        with self.lock:
+            try:
+                self.socket.send_string(json.dumps({'method': method, 'params': params or {}}))
+                self.socket.recv_string()  # Wait for ack
+            except Exception as e:
+                logger.error(f'Failed to call LED daemon: {e}')
+                # Reconnect on error
+                self._socket_connect()
+                assert self._poll_daemon(), 'Unable to reconnect to LED daemon!'
 
     def run(self):
         logger.info('LedStripManager started')
-
-        # init has to be the first call
-        params = {'num_leds': self.num_leds,
-                  'pin': self.pin,
-                  'brightness': self.brightness,
-                  'base_color': self.base_color}
-        self._rpc_call('init', params)
 
         # Trigger Ready animation
         self.current_state = PRIO_READY
@@ -197,7 +199,7 @@ class LedStripManager(threading.Thread):
         elif self.current_state == PRIO_CHARGING:
             self._rpc_call('start_animation', {'name': 'charging', 'data': {'soc': self.state_data.get('soc', 0)}})
         else:
-            self._rpc_call('set_solid', self.base_color)
+            self._rpc_call('set_solid', dict(zip(['r', 'g', 'b'], self.base_color)))
 
     def trigger_shutdown(self):
         self.current_state = PRIO_SHUTDOWN

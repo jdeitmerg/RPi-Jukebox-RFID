@@ -28,7 +28,7 @@ class LedDaemon:
         self.strip.begin()
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
 
-        logger.info(f"LED Daemon initialized on pin {pin} with {num_leds} LEDs)")
+        logger.info(f"LED Daemon initialized on pin {pin} with {num_leds} LEDs")
 
     def set_solid(self, r, g, b):
         with self.lock:
@@ -174,6 +174,7 @@ class MsgHandler():
         # Make sure users other than root can access the newly created socket
         group = grp.getgrnam('users').gr_gid
         os.chown(SOCKET_PATH, 0, group)  # 0 is root uid
+        os.chmod(SOCKET_PATH, 0o660)     # Ensure it's readable/writable by the group
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
