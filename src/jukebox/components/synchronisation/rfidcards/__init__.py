@@ -123,9 +123,13 @@ class SyncRfidcards:
 
         if self._is_sync_enabled():
             logger.info("Syncing all")
-            _database_synced = self._sync_card_database()
-            _folder_synced = self._sync_folder('')
-            _files_synced = _database_synced or _folder_synced
+            jukebox.publishing.get_publisher().send('sync.status', {'active': True})
+            try:
+                _database_synced = self._sync_card_database()
+                _folder_synced = self._sync_folder('')
+                _files_synced = _database_synced or _folder_synced
+            finally:
+                jukebox.publishing.get_publisher().send('sync.status', {'active': False})
 
         return _files_synced
 
@@ -140,7 +144,11 @@ class SyncRfidcards:
         _files_synced = False
 
         if self._is_sync_enabled_on_rfid_scan():
-            _files_synced = self._sync_card_database(card_id)
+            jukebox.publishing.get_publisher().send('sync.status', {'active': True})
+            try:
+                _files_synced = self._sync_card_database(card_id)
+            finally:
+                jukebox.publishing.get_publisher().send('sync.status', {'active': False})
 
         return _files_synced
 
@@ -154,7 +162,11 @@ class SyncRfidcards:
         _files_synced = False
 
         if self._is_sync_enabled_on_rfid_scan():
-            _files_synced = self._sync_folder(folder)
+            jukebox.publishing.get_publisher().send('sync.status', {'active': True})
+            try:
+                _files_synced = self._sync_folder(folder)
+            finally:
+                jukebox.publishing.get_publisher().send('sync.status', {'active': False})
 
         return _files_synced
 

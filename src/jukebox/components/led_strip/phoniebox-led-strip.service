@@ -1,0 +1,12 @@
+[Unit]
+Description=Phoniebox LED Strip Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/jonas/Sync/Archiv/devel/hardware/Phoniebox/software/RPi-Jukebox-RFID/src/jukebox/components/led_strip/led_strip_daemon.py --leds 16 --pin 12 --brightness 50
+Restart=always
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
