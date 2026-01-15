@@ -12,7 +12,7 @@ input_devices:
     type: Button
     kwargs:
       pin: GPIO7
-      hold_time: 0.75
+      hold_time: 0.5
       hold_repeat: True
     actions:
       on_press:
@@ -22,19 +22,22 @@ input_devices:
     type: Button
     kwargs:
       pin: GPIO5
-      hold_time: 0.75
+      hold_time: 0.5
       hold_repeat: True
     actions:
       on_press:
         alias: change_volume
         args: -5
   BtnPower:
-    type: LongPressButton
+    type: ShortLongPressButton
     kwargs:
       pin: GPIO4
-      hold_time: 4
+      hold_time: 3
     actions:
-      on_press:
+      on_short_press:
+        package: led_strip
+        plugin: show_battery
+      on_long_press:
         alias: shutdown
   BtnHeadphones: # Named BTN_BLUETOOTH in schematic
     type: Button

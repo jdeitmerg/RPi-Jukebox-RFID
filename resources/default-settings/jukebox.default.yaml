@@ -20,6 +20,7 @@ modules:
     gpio: gpio.gpioz.plugin
     sync_rfidcards: synchronisation.rfidcards
     battmon: battery_monitor.batt_mon_sysfs
+    led_strip: led_strip
   others:
   - misc
 pulse:
@@ -162,3 +163,9 @@ battmon:
   sysfs_voltage_path: /sys/class/power_supply/bq25890-charger-0/voltage_now
   scale_to_phy_num: 1
   scale_to_phy_denom: 1000
+led_strip:
+  enable: true
+  num_leds: 9
+  pin: 12
+  brightness: 50
+  base_color: [255, 100, 0]

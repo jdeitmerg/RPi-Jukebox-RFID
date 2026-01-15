@@ -5,11 +5,12 @@ import json
 import zmq
 import jukebox.publishing.subscriber as subscriber
 import jukebox.cfghandler
+import jukebox.plugs as plugin
 
 logger = logging.getLogger('jb.led_strip.manager')
 cfg = jukebox.cfghandler.get_handler('jukebox')
 
-# State priorities (used as state ID as well)
+# State priorities (used as state ID )
 PRIO_IDLE = 10
 PRIO_CHARGING = 20
 PRIO_SYNC = 30
@@ -20,12 +21,15 @@ PRIO_SHUTDOWN = 100
 
 
 class LedStripManager(threading.Thread):
-    def __init__(self, port=5559, kid_color=(255, 255, 255)):
+    def __init__(self, num_leds=16, pin=12, brightness=50, base_color=(255, 255, 255)):
         super().__init__(name='LedStripManager')
-        self.port = port
-        self.kid_color = kid_color
+        self.port = 5559
         self.daemon = True
         self._keep_running = True
+        self.num_leds = num_leds
+        self.pin = pin
+        self.brightness = brightness
+        self.base_color = {'r': base_color[0], 'g': base_color[1], 'b': base_color[2]}
 
         # RPC Setup
         self.context = zmq.Context()
@@ -43,7 +47,7 @@ class LedStripManager(threading.Thread):
 
         # Subscriptions
         self.sub = subscriber.Subscriber("inproc://PublisherToProxy", [
-            'volume.level', 'batt_status', 'sync.status'
+            'volume.level', 'sync.status'
         ])
 
     def _rpc_call(self, method, params=None):
@@ -60,8 +64,12 @@ class LedStripManager(threading.Thread):
     def run(self):
         logger.info("LedStripManager started")
 
-        # Initial sync of base color
-        self._rpc_call('set_base_color', {'r': self.kid_color[0], 'g': self.kid_color[1], 'b': self.kid_color[2]})
+        # init has to be the first call
+        params = {'num_leds': self.num_leds,
+                  'pin': self.pin,
+                  'brightness': self.brightness,
+                  'base_color': self.base_color}
+        self._rpc_call('init', params)
 
         # Trigger Ready animation
         self.current_state = PRIO_READY
@@ -70,12 +78,12 @@ class LedStripManager(threading.Thread):
 
         while self._keep_running:
             try:
-                # We don't need 50Hz here anymore since the daemon handles animations
-                topic, payload = self.sub.receive(timeout=0.1)
+                topic, payload = self.sub.receive(zmq.NOBLOCK)
                 if topic:
                     self._handle_event(topic, payload)
-            except Exception:
-                pass
+            except zmq.ZMQError:
+                # No message received. Delay here so we don't delay when there are messages to process
+                time.sleep(0.1)
 
             # Check timeouts for Ready and Overlays
             now = time.time()
@@ -89,10 +97,10 @@ class LedStripManager(threading.Thread):
             self._update_daemon()
 
     def _handle_event(self, topic, payload):
+        logger.debug(f"Received event on topic '{topic}': {payload}")
         if topic == 'volume.level':
-            self._trigger_overlay('volume', payload, duration=3)
-        elif topic == 'batt_status':
-            self._handle_battery(payload)
+            max_volume = plugin.call('volume', 'ctrl', 'get_soft_max_volume')
+            self._trigger_overlay('volume', payload['volume'] / max_volume, duration=5)
         elif topic == 'sync.status':
             self._handle_sync(payload)
 
@@ -104,8 +112,8 @@ class LedStripManager(threading.Thread):
             self.overlay_start_time = time.time()
 
     def _handle_battery(self, payload):
-        soc = payload.get('soc', 0)
-        warning = soc < 20
+        soc = payload.get('soc', 0) / 100
+        warning = soc < .2
         charging = payload.get('charging', 0)
 
         if warning:
@@ -145,18 +153,18 @@ class LedStripManager(threading.Thread):
             self._rpc_call('start_animation', {'name': 'ready'})
         elif self.current_state == PRIO_OVERLAY:
             if self.state_data['type'] == 'volume':
-                self._rpc_call('set_bar', {'percentage': self.state_data['value']})
+                self._rpc_call('set_bar', {'ratio': self.state_data['value']})
             elif self.state_data['type'] == 'battery':
                 # Battery level is static bar in daemon
-                self._rpc_call('set_bar', {'percentage': self.state_data['value']})
+                self._rpc_call('set_bar', {'ratio': self.state_data['value']})
         elif self.current_state == PRIO_BATT_WARNING:
-            self._rpc_call('set_bar', {'percentage': self.state_data['soc'], 'r': 255, 'g': 0, 'b': 0})
+            self._rpc_call('set_bar', {'ratio': self.state_data['soc'], 'r': 255, 'g': 0, 'b': 0})
         elif self.current_state == PRIO_SYNC:
             self._rpc_call('start_animation', {'name': 'sync'})
         elif self.current_state == PRIO_CHARGING:
             self._rpc_call('start_animation', {'name': 'charging', 'data': {'soc': self.state_data.get('soc', 0)}})
         else:
-            self._rpc_call('set_solid', {'r': self.kid_color[0], 'g': self.kid_color[1], 'b': self.kid_color[2]})
+            self._rpc_call('set_solid', self.base_color)
 
     def trigger_shutdown(self):
         self.current_state = PRIO_SHUTDOWN
@@ -164,6 +172,5 @@ class LedStripManager(threading.Thread):
 
     def stop(self):
         self._keep_running = False
-        self._rpc_call('clear')
         self.socket.close()
         self.context.term()

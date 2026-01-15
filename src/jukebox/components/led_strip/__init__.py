@@ -1,7 +1,7 @@
 import logging
 import jukebox.plugs as plugs
 import jukebox.cfghandler
-from .led_strip_manager import LedStripManager
+from components.led_strip.led_strip_manager import LedStripManager
 import time
 
 logger = logging.getLogger('jb.led_strip')
@@ -20,11 +20,13 @@ def initialize():
         logger.info("LED Strip Plugin is disabled")
         return
 
-    port = cfg.setndefault('led_strip', 'daemon_port', value=5559)
-    kid_color = cfg.setndefault('led_strip', 'kid_color', value=[255, 255, 255])
+    num_leds = cfg.setndefault('led_strip', 'num_leds', value=16)
+    pin = cfg.setndefault('led_strip', 'pin', value=12)
+    brightness = cfg.setndefault('led_strip', 'brightness', value=50)
+    base_color = cfg.setndefault('led_strip', 'base_color', value=[255, 255, 255])
 
     try:
-        led_strip_manager = LedStripManager(port, tuple(kid_color))
+        led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color))
         led_strip_manager.start()
     except Exception as e:
         logger.error(f"Failed to start LedStripManager: {e}")
@@ -51,9 +53,9 @@ def show_battery():
     """Manually trigger battery level display."""
     global led_strip_manager
     if led_strip_manager:
-        status = plugs.call_ignore_errors('battmon', 'get_batt_status')
+        status = plugs.call_ignore_errors('battmon', 'batt_mon', 'get_batt_status')
         if status:
-            led_strip_manager._trigger_overlay('battery', status.get('soc', 0), duration=5)
+            led_strip_manager._trigger_overlay('battery', status.get('soc', 0) / 100, duration=5)
 
 
 @plugs.register

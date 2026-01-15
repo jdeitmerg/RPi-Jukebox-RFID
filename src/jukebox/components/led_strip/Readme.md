@@ -192,3 +192,13 @@ Night Mode affects all states.
 - The brightness is reduced to a configurable level.
 - The brightness is reduced based on the time of the day, with configurable beginnin and end.
 - The plugin exposes a function to toggle night mode manually, overwriting the state based on time of the day.
+
+## ToDo
+
+- Fix "Module components.led_strip.led_strip_manager not loaded as plugin" error
+- Ignore volume update on boot
+- Night mode
+- `invert_direction` configuration flag
+- Battery bar sections (red, yellow, green)
+- Battery alert
+- Test all states defined above

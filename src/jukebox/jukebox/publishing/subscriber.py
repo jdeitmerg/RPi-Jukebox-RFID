@@ -25,8 +25,8 @@ class Subscriber:
         logger.debug(f"ZMQ Subscriber initialized on '{url}' (Pyzmq version: {zmq.pyzmq_version()}; "
                      f"ZMQ version: {zmq.zmq_version()}; has draft API: {zmq.DRAFT_API})")
 
-    def receive(self):
-        [topic, message] = self.socket.recv_multipart()
+    def receive(self, zmq_flags: int = 0) -> list:
+        [topic, message] = self.socket.recv_multipart(flags=zmq_flags)
         if message == b'':
             logger.debug(f"Revocation request for topic: {topic}")
             return [topic.decode('utf-8'), '']
