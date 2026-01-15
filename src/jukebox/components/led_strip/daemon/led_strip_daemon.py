@@ -4,7 +4,12 @@ import zmq
 import json
 import logging
 import threading
+import argparse
+import os
+import grp
 from rpi_ws281x import Color, PixelStrip
+
+SOCKET_PATH = "daemon.sock"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -12,21 +17,17 @@ logger = logging.getLogger('led_daemon')
 
 
 class LedDaemon:
-    def __init__(self):
+    def __init__(self, num_leds, pin, base_color, brightness=50):
         self.cur_animation = None
         self.anim_start_time = 0
         self.anim_data = {}
         self._keep_running = True
         self.lock = threading.Lock()
-        self.initialized = False
-
-    def init(self, num_leds, pin, base_color, brightness=50):
         self.num_leds = num_leds
         self.strip = PixelStrip(num_leds, pin, brightness=brightness)
         self.strip.begin()
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
 
-        self.initialized = True
         logger.info(f"LED Daemon initialized on pin {pin} with {num_leds} LEDs)")
 
     def set_solid(self, r, g, b):
@@ -162,15 +163,17 @@ class LedDaemon:
 
 
 class MsgHandler():
-    def __init__(self, led_daemon, listen_port):
+    def __init__(self, led_daemon):
         self.led_daemon = led_daemon
-        self.listen_port = listen_port
 
     def __enter__(self):
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)
-        self.socket.bind(f"tcp://127.0.0.1:{self.listen_port}")
+        self.socket.bind(f'ipc://{SOCKET_PATH}')
         self.socket.setsockopt(zmq.RCVTIMEO, 20)  # 20ms timeout for non-blocking receive
+        # Make sure users other than root can access the newly created socket
+        group = grp.getgrnam('users').gr_gid
+        os.chown(SOCKET_PATH, 0, group)  # 0 is root uid
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -181,11 +184,6 @@ class MsgHandler():
         logger.debug(f"Received request: {request}")
         method = request.get('method')
         params = request.get('params', {})
-
-        if method != 'init' and not self.led_daemon.initialized:
-            self.socket.send_string(json.dumps({'status': 'error', 'message': 'Daemon not initialized'}))
-            logger.warning("Received command before initialization")
-            return
 
         match method:
             case 'init':
@@ -205,6 +203,10 @@ class MsgHandler():
                 self.led_daemon.start_animation(params.get('name'), params.get('data'))
             case'stop_animation':
                 self.led_daemon.cur_animation = None
+            case 'ping':
+                pass  # Just respond with 'ok'
+            case _:
+                logger.warning(f"Unknown method: {method}")
 
         self.socket.send_string(json.dumps({'status': 'ok'}))
 
@@ -219,11 +221,22 @@ class MsgHandler():
 
 
 def main():
-    daemon = LedDaemon()
-    port = 5559
+    parser = argparse.ArgumentParser(description="LED Strip Daemon")
+    parser.add_argument("--pin", type=int, default=12, help="GPIO pin to which the LED strip is connected")
+    parser.add_argument("--num-leds", type=int, default=16, help="Number of LEDs in the strip")
+    parser.add_argument("--brightness", type=int, default=50, help="Brightness of the LED strip (0-100)")
+    parser.add_argument("--base-color", type=str, default="255,255,255", help="Base color in R,G,B format")
+    args = parser.parse_args()
 
-    with MsgHandler(daemon, port) as handler:
-        logger.info(f"LED Daemon listening on port {port}")
+    daemon = LedDaemon(
+        num_leds=args.num_leds,
+        pin=args.pin,
+        brightness=args.brightness,
+        base_color=dict(zip(['r', 'g', 'b'], map(int, args.base_color.split(','))))
+    )
+
+    with MsgHandler(daemon) as handler:
+        logger.info("LED Daemon listening on IPC socket")
         while True:
             handler.receive_and_process()
             time.sleep(0.01)  # Sleep even if we just processed a request

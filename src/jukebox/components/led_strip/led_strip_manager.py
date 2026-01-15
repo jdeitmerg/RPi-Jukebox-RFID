@@ -3,12 +3,16 @@ import time
 import logging
 import json
 import zmq
+import subprocess
 import jukebox.publishing.subscriber as subscriber
 import jukebox.cfghandler
 import jukebox.plugs as plugin
 
 logger = logging.getLogger('jb.led_strip.manager')
 cfg = jukebox.cfghandler.get_handler('jukebox')
+
+DAEMON_DIR = __file__.replace('led_strip_manager.py', 'daemon')
+SOCKET_PATH = f'{DAEMON_DIR}/daemon.sock'
 
 # State priorities (used as state ID )
 PRIO_IDLE = 10
@@ -23,20 +27,26 @@ PRIO_SHUTDOWN = 100
 class LedStripManager(threading.Thread):
     def __init__(self, num_leds=16, pin=12, brightness=50, base_color=(255, 255, 255)):
         super().__init__(name='LedStripManager')
-        self.port = 5559
-        self.daemon = True
+        self.daemon = True  # Make sure thread exits with main program
         self._keep_running = True
+        self.daemon_proc = None
         self.num_leds = num_leds
         self.pin = pin
         self.brightness = brightness
-        self.base_color = {'r': base_color[0], 'g': base_color[1], 'b': base_color[2]}
+        self.base_color = base_color
 
+        self._start_daemon()
         # RPC Setup
         self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.REQ)
-        self.socket.connect(f"tcp://127.0.0.1:{self.port}")
-        self.socket.setsockopt(zmq.LINGER, 500)
-        self.socket.setsockopt(zmq.RCVTIMEO, 1000)
+        for _ in range(20):
+            try:
+                self._socket_connect()
+                if self._poll_daemon():
+                    break
+            except Exception:
+                time.sleep(1)
+        else:
+            raise RuntimeError('LED Daemon did not start properly!')
 
         # State tracking
         self.current_state = PRIO_IDLE
@@ -46,23 +56,46 @@ class LedStripManager(threading.Thread):
         self.last_sent_state = None
 
         # Subscriptions
-        self.sub = subscriber.Subscriber("inproc://PublisherToProxy", [
+        self.sub = subscriber.Subscriber('inproc://PublisherToProxy', [
             'volume.level', 'sync.status'
         ])
+
+    def _start_daemon(self):
+        self.daemon_proc = subprocess.Popen(['sudo', f'{DAEMON_DIR}/run_daemon.sh',
+                                              '--num-leds', str(self.num_leds),
+                                              '--pin', str(self.pin),
+                                              '--brightness', str(self.brightness),
+                                              '--base-color', ','.join(map(str, self.base_color))])
+
+    def _poll_daemon(self):
+        # Check if daemon is running
+        try:
+            logger.debug('Pinging LED daemon...')
+            self.socket.send_string(json.dumps({'method': 'ping'}))
+            self.socket.recv_string()
+            return True
+        except Exception:
+            return False
+
+    def _socket_connect(self):
+        self.socket = self.context.socket(zmq.REQ)
+        self.socket.connect(f'ipc://{SOCKET_PATH}')
+        self.socket.setsockopt(zmq.LINGER, 500)
+        self.socket.setsockopt(zmq.RCVTIMEO, 1000)
 
     def _rpc_call(self, method, params=None):
         try:
             self.socket.send_string(json.dumps({'method': method, 'params': params or {}}))
             self.socket.recv_string()  # Wait for ack
         except Exception as e:
-            logger.error(f"Failed to call LED daemon: {e}")
+            logger.error(f'Failed to call LED daemon: {e}')
             # Reconnect on error
             self.socket.close()
-            self.socket = self.context.socket(zmq.REQ)
-            self.socket.connect(f"tcp://127.0.0.1:{self.port}")
+            self._socket_connect()
+            assert self._poll_daemon(), 'Unable to reconnect to LED daemon!'
 
     def run(self):
-        logger.info("LedStripManager started")
+        logger.info('LedStripManager started')
 
         # init has to be the first call
         params = {'num_leds': self.num_leds,
@@ -97,7 +130,7 @@ class LedStripManager(threading.Thread):
             self._update_daemon()
 
     def _handle_event(self, topic, payload):
-        logger.debug(f"Received event on topic '{topic}': {payload}")
+        logger.debug(f'Received event on topic "{topic}": {payload}')
         if topic == 'volume.level':
             max_volume = plugin.call('volume', 'ctrl', 'get_soft_max_volume')
             self._trigger_overlay('volume', payload['volume'] / max_volume, duration=5)
@@ -174,3 +207,6 @@ class LedStripManager(threading.Thread):
         self._keep_running = False
         self.socket.close()
         self.context.term()
+        if self.daemon_proc:
+            self.daemon_proc.terminate()
+            self.daemon_proc.wait()

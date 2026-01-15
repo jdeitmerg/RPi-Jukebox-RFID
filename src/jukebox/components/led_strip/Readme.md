@@ -202,3 +202,6 @@ Night Mode affects all states.
 - Battery bar sections (red, yellow, green)
 - Battery alert
 - Test all states defined above
+- Manage daemon from within main application
+- Implement proper interpolation for smooth patterns
+- Refactor priority scheme

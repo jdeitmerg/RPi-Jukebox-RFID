@@ -25,11 +25,11 @@ def initialize():
     brightness = cfg.setndefault('led_strip', 'brightness', value=50)
     base_color = cfg.setndefault('led_strip', 'base_color', value=[255, 255, 255])
 
-    try:
-        led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color))
-        led_strip_manager.start()
-    except Exception as e:
-        logger.error(f"Failed to start LedStripManager: {e}")
+    logging.debug(f"LED Strip Config - num_leds: {num_leds}, pin: {pin}, "
+                    f"brightness: {brightness}, base_color: {base_color}")
+
+    led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color))
+    led_strip_manager.start()
 
     if led_strip_manager:
         # Register the control instance
