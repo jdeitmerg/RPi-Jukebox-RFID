@@ -72,10 +72,10 @@ class LedStripManager(threading.Thread):
                                               '--base-color', ','.join(map(str, self.base_color))],
                                               stdout=subprocess.DEVNULL,  # Suppress output to avoid cluttering logs
                                               stderr=subprocess.DEVNULL,
-                                              # If stdin is not redirected as well, the console log of the jukebox app is
-                                              # messed up (looks like carriage return missing on Windows). Even if all output
-                                              # is removed from the run_daemon.sh script.
-                                              stdin=subprocess.DEVNULL)
+                                              # start_new_session makes sure the process is not killed immediately when the
+                                              # main app receives SIGINT/SIGTERM. It also stops the log from getting messed up
+                                              # (looking like carriage return missing on Windows).
+                                              start_new_session=True)
 
     def _poll_daemon(self):
         # Check if daemon is running
@@ -100,7 +100,8 @@ class LedStripManager(threading.Thread):
         with self.lock:
             try:
                 self.daemon_socket.send_string(json.dumps({'method': method, 'params': params or {}}))
-                self.daemon_socket.recv_string()  # Wait for ack
+                if method != 'exit':
+                    self.daemon_socket.recv_string()  # Wait for ack
             except Exception as e:
                 logger.error(f'Failed to call LED daemon: {e}')
                 # Reconnect on error
@@ -215,8 +216,11 @@ class LedStripManager(threading.Thread):
 
     def stop(self):
         self._keep_running = False
+        if self.daemon_proc:
+            logger.debug('Requesting LED daemon shutdown...')
+            # Can't use terminate(), as sudo was used to start the process, which creates a new process group.
+            self._rpc_call('exit')
+            self.daemon_proc.wait()
+            logger.debug('LED daemon process terminated.')
         self.daemon_socket.close()
         self.context.term()
-        if self.daemon_proc:
-            self.daemon_proc.terminate()
-            self.daemon_proc.wait()

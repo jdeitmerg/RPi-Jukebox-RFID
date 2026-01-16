@@ -13,15 +13,14 @@ SOCKET_PATH = '/tmp/led_strip_daemon.sock'
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger('led_daemon')
+logger = logging.getLogger('led_strip_daemon')
 
 
-class LedDaemon:
+class LedManager:
     def __init__(self, num_leds, pin, base_color, brightness=50):
         self.cur_animation = None
         self.anim_start_time = 0
         self.anim_data = {}
-        self._keep_running = True
         self.lock = threading.Lock()
         self.num_leds = num_leds
         self.strip = PixelStrip(num_leds, pin, brightness=brightness)
@@ -163,8 +162,8 @@ class LedDaemon:
 
 
 class MsgHandler():
-    def __init__(self, led_daemon):
-        self.led_daemon = led_daemon
+    def __init__(self, led_mgr):
+        self.led_mgr = led_mgr
 
     def __enter__(self):
         self.context = zmq.Context()
@@ -192,20 +191,23 @@ class MsgHandler():
                 pin = params.get('pin', 12)
                 brightness = params.get('brightness', 50)
                 base_color = params.get('base_color', {'r': 255, 'g': 255, 'b': 255})
-                self.led_daemon.init(num_leds, pin, base_color, brightness)
+                self.led_mgr.init(num_leds, pin, base_color, brightness)
             case 'set_solid':
-                self.led_daemon.set_solid(params.get('r', 0), params.get('g', 0), params.get('b', 0))
+                self.led_mgr.set_solid(params.get('r', 0), params.get('g', 0), params.get('b', 0))
             case'set_bar':
-                self.led_daemon.set_bar(params.get('ratio', 0),
+                self.led_mgr.set_bar(params.get('ratio', 0),
                                     params.get('r', 255),
                                     params.get('g', 255),
                                     params.get('b', 255))
             case'start_animation':
-                self.led_daemon.start_animation(params.get('name'), params.get('data'))
+                self.led_mgr.start_animation(params.get('name'), params.get('data'))
             case'stop_animation':
-                self.led_daemon.cur_animation = None
+                self.led_mgr.cur_animation = None
             case 'ping':
                 pass  # Just respond with 'ok'
+            case 'exit':
+                logger.info("Shutting down LED Daemon as per request")
+                os._exit(0)
             case _:
                 logger.warning(f"Unknown method: {method}")
 
@@ -218,7 +220,7 @@ class MsgHandler():
             self._process_request(request)
         except zmq.Again:
             pass  # No request received
-        self.led_daemon.update_animation()
+        self.led_mgr.update_animation()
 
 
 def main():
@@ -229,14 +231,14 @@ def main():
     parser.add_argument("--base-color", type=str, default="255,255,255", help="Base color in R,G,B format")
     args = parser.parse_args()
 
-    daemon = LedDaemon(
+    led_mgr = LedManager(
         num_leds=args.num_leds,
         pin=args.pin,
         brightness=args.brightness,
         base_color=dict(zip(['r', 'g', 'b'], map(int, args.base_color.split(','))))
     )
 
-    with MsgHandler(daemon) as handler:
+    with MsgHandler(led_mgr) as handler:
         logger.info("LED Daemon listening on IPC socket")
         while True:
             handler.receive_and_process()
