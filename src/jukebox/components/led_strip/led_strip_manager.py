@@ -36,6 +36,7 @@ class LedStripManager(threading.Thread):
         self.base_color = base_color
         self.lock = threading.Lock()
         self.socket = None
+        self.ts_start = time.monotonic()
 
         with self.lock:
             self._start_daemon()
@@ -108,7 +109,7 @@ class LedStripManager(threading.Thread):
 
         # Trigger Ready animation
         self.current_state = PRIO_READY
-        self.overlay_start_time = time.time()
+        self.overlay_start_time = time.monotonic()
         self._rpc_call('start_animation', {'name': 'ready'})
 
         while self._keep_running:
@@ -121,7 +122,7 @@ class LedStripManager(threading.Thread):
                 time.sleep(0.1)
 
             # Check timeouts for Ready and Overlays
-            now = time.time()
+            now = time.monotonic()
             if self.current_state == PRIO_OVERLAY:
                 if now - self.overlay_start_time > self.overlay_timeout:
                     self._reset_state()
@@ -134,8 +135,12 @@ class LedStripManager(threading.Thread):
     def _handle_event(self, topic, payload):
         logger.debug(f'Received event on topic "{topic}": {payload}')
         if topic == 'volume.level':
-            max_volume = plugin.call('volume', 'ctrl', 'get_soft_max_volume')
-            self._trigger_overlay('volume', payload['volume'] / max_volume, duration=5)
+            if time.monotonic() - self.ts_start < 10:
+                # The volume is always set automatically on startup. Supress showing the volume bar.
+                logger.debug('Not displaying volume change right after startup')
+            else:
+                max_volume = plugin.call('volume', 'ctrl', 'get_soft_max_volume')
+                self._trigger_overlay('volume', payload['volume'] / max_volume, duration=5)
         elif topic == 'sync.status':
             self._handle_sync(payload)
 
@@ -144,7 +149,7 @@ class LedStripManager(threading.Thread):
             self.current_state = PRIO_OVERLAY
             self.state_data = {'type': type, 'value': value}
             self.overlay_timeout = duration
-            self.overlay_start_time = time.time()
+            self.overlay_start_time = time.monotonic()
 
     def _handle_battery(self, payload):
         soc = payload.get('soc', 0) / 100
