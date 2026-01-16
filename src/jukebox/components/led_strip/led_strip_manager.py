@@ -61,7 +61,7 @@ class LedStripManager(threading.Thread):
 
         # Subscriptions
         self.sub = subscriber.Subscriber('inproc://PublisherToProxy', [
-            'volume.level', 'sync.status'
+            'volume.level', 'sync.status', 'batt_status'
         ])
 
     def _start_daemon(self):
@@ -138,15 +138,20 @@ class LedStripManager(threading.Thread):
 
     def _handle_event(self, topic, payload):
         logger.debug(f'Received event on topic "{topic}": {payload}')
-        if topic == 'volume.level':
-            if time.monotonic() - self.ts_start < 10:
-                # The volume is always set automatically on startup. Supress showing the volume bar.
-                logger.debug('Not displaying volume change right after startup')
-            else:
-                max_volume = plugin.call('volume', 'ctrl', 'get_soft_max_volume')
-                self._trigger_overlay('volume', payload['volume'] / max_volume, duration=5)
-        elif topic == 'sync.status':
-            self._handle_sync(payload)
+        match topic:
+            case 'volume.level':
+                if time.monotonic() - self.ts_start < 10:
+                    # The volume is always set automatically on startup. Supress showing the volume bar.
+                    logger.debug('Not displaying volume change right after startup')
+                else:
+                    max_volume = plugin.call('volume', 'ctrl', 'get_soft_max_volume')
+                    self._trigger_overlay('volume', payload['volume'] / max_volume, duration=5)
+            case 'sync.status':
+                self._handle_sync(payload)
+            case 'batt_status':
+                self._handle_battery(payload)
+            case _:
+                logger.warning(f'Unhandled topic "{topic}" in LedStripManager')
 
     def _trigger_overlay(self, type, value, duration):
         if self.current_state <= PRIO_OVERLAY:
@@ -200,9 +205,9 @@ class LedStripManager(threading.Thread):
                 self._rpc_call('set_bar', {'ratio': self.state_data['value']})
             elif self.state_data['type'] == 'battery':
                 # Battery level is static bar in daemon
-                self._rpc_call('set_bar', {'ratio': self.state_data['value']})
+                self._rpc_call('set_battery', {'ratio': self.state_data['value']})
         elif self.current_state == PRIO_BATT_WARNING:
-            self._rpc_call('set_bar', {'ratio': self.state_data['soc'], 'r': 255, 'g': 0, 'b': 0})
+            self._rpc_call('set_battery', {'ratio': self.state_data['soc']})
         elif self.current_state == PRIO_SYNC:
             self._rpc_call('start_animation', {'name': 'sync'})
         elif self.current_state == PRIO_CHARGING:

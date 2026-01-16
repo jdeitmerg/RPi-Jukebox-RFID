@@ -57,6 +57,13 @@ class LedManager:
             self.strip.show()
             logger.debug(f"Set bar: {ratio * 100}%")
 
+    def set_battery_bar(self, ratio):
+        with self.lock:
+            self.cur_animation = None
+            self._render_battery_bar(ratio)
+            self.strip.show()
+            logger.debug(f"Set battery bar: {ratio * 100}%")
+
     def start_animation(self, name, data=None):
         with self.lock:
             self.cur_animation = name
@@ -124,22 +131,38 @@ class LedManager:
         target_num = int(soc * self.num_leds)
         current_num = int(progress * self.num_leds)
 
+        # Dim background. Again don't use strip.setBrightness to avoid resetting later
+        r_bg = int(self.base_color.r * 0.1)
+        g_bg = int(self.base_color.g * 0.1)
+        b_bg = int(self.base_color.b * 0.1)
         for i in range(self.num_leds):
-            idx = self.num_leds - 1 - i
             if i < current_num and i < target_num:
-                if i < self.num_leds * 0.2:
-                    color = Color(255, 0, 0)
-                elif i < self.num_leds * 0.4:
-                    color = Color(255, 255, 0)
-                else:
-                    color = Color(0, 255, 0)
-                self.strip.setPixelColor(idx, color)
+                self.strip.setPixelColor(i, self._battery_color(i))
             else:
-                # Dim background. Again don't use strip.setBrightness to avoid resetting later
-                r = int(self.base_color.r * 0.1)
-                g = int(self.base_color.g * 0.1)
-                b = int(self.base_color.b * 0.1)
-                self.strip.setPixelColor(idx, Color(r, g, b))
+                self.strip.setPixelColor(i, Color(r_bg, g_bg, b_bg))
+
+    def _battery_color(self, index_from_right, scale=1.0):
+        ratio = (index_from_right + 1) / self.num_leds
+        if ratio <= 0.2:
+            r, g, b = 255, 0, 0
+        elif ratio <= 0.4:
+            r, g, b = 255, 255, 0
+        else:
+            r, g, b = 0, 255, 0
+        return Color(int(r * scale), int(g * scale), int(b * scale))
+
+    def _render_battery_bar(self, ratio):
+        ratio = max(0.0, min(1.0, ratio))
+        num_lit = int(ratio * self.num_leds)
+        partial_brightness = ratio * self.num_leds - num_lit
+
+        for i in range(self.num_leds):
+            if i < num_lit:
+                self.strip.setPixelColor(i, self._battery_color(i))
+            elif i == num_lit and partial_brightness > 0:
+                self.strip.setPixelColor(i, self._battery_color(i, partial_brightness))
+            else:
+                self.strip.setPixelColor(i, Color(0, 0, 0))
 
     def _pattern_shutdown(self, elapsed):
         # Light down from edges to center. Leave center LED (LEDs if there's an even number) on until power is cut
@@ -199,6 +222,8 @@ class MsgHandler():
                                     params.get('r', 255),
                                     params.get('g', 255),
                                     params.get('b', 255))
+            case 'set_battery':
+                self.led_mgr.set_battery_bar(params.get('ratio', 0))
             case'start_animation':
                 self.led_mgr.start_animation(params.get('name'), params.get('data'))
             case'stop_animation':
