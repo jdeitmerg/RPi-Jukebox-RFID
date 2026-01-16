@@ -17,6 +17,7 @@ SOCKET_PATH = '/tmp/led_strip_daemon.sock'
 # State priorities (used as state ID )
 PRIO_IDLE = 10
 PRIO_CHARGING = 20
+PRIO_FULL = 25
 PRIO_SYNC = 30
 PRIO_BATT_WARNING = 40
 PRIO_OVERLAY = 50  # Temporary overlays like volume/battery
@@ -164,11 +165,16 @@ class LedStripManager(threading.Thread):
         soc = payload.get('soc', 0) / 100
         warning = soc < .2
         charging = payload.get('charging', 0)
+        full = soc >= .99
 
         if warning:
             if self.current_state < PRIO_BATT_WARNING:
                 self.current_state = PRIO_BATT_WARNING
                 self.state_data = {'soc': soc}
+        elif full:
+            if self.current_state < PRIO_FULL:
+                self.current_state = PRIO_FULL
+                self.state_data = {'soc': 1}
         elif charging:
             if self.current_state < PRIO_CHARGING:
                 self.current_state = PRIO_CHARGING
@@ -206,7 +212,7 @@ class LedStripManager(threading.Thread):
             elif self.state_data['type'] == 'battery':
                 # Battery level is static bar in daemon
                 self._rpc_call('set_battery', {'ratio': self.state_data['value']})
-        elif self.current_state == PRIO_BATT_WARNING:
+        elif self.current_state in (PRIO_BATT_WARNING, PRIO_FULL):
             self._rpc_call('set_battery', {'ratio': self.state_data['soc']})
         elif self.current_state == PRIO_SYNC:
             self._rpc_call('start_animation', {'name': 'sync'})
