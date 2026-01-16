@@ -17,6 +17,7 @@ logger = logging.getLogger('led_strip_daemon')
 
 
 class VirtualPixelStrip(PixelStrip):
+    ''' A virtual pixel strip that uses multiple virtual pixels per real LED for smoother animations.'''
     def __init__(self, num, pin, freq_hz=800000, dma=10, invert=False,
                  brightness=255, channel=0, strip_type=None, gamma=None, pixels_per_led=10):
         super().__init__(num, pin, freq_hz, dma, invert, brightness, channel, strip_type, gamma)
@@ -28,12 +29,19 @@ class VirtualPixelStrip(PixelStrip):
         return self.pixels[index]
 
     def __setitem__(self, index, color):
-        self.pixels[index] = color
+        ''' Set the color value at the provided position or slice of positions.
+        '''
+        if isinstance(index, slice):
+            for i in range(*index.indices(len(self.pixels))):
+                self.pixels[i] = color
+        else:
+            self.pixels[index] = color
 
     def __len__(self):
         return len(self.pixels)
 
     def _downsample(self):
+        ''' Downsample virtual pixels to real LEDs by averaging colors. '''
         for i in range(self.num_leds):
             r_total, g_total, b_total = 0, 0, 0
             for j in range(self.pixels_per_led):
@@ -148,21 +156,21 @@ class LedManager:
                 self.strip.setPixelColor(i, Color(r, g, b))
 
     def _pattern_sync(self, elapsed):
-        # Moving dots from edges to center and back
-        for i in range(self.num_pixels):
-            self.strip.setPixelColor(i, Color(0, 0, 0))
+        # Moving dots (10% of pixels) from edges to center and back
+        self.strip[:] = Color(0, 0, 0)
         period = 2.0
         progress = (elapsed % period) / period
-        pos = abs(0.5 - progress) * 2.0
-        idx1 = int(pos * (self.num_pixels / 2.0 - 0.5))
-        idx2 = self.num_pixels - 1 - idx1
-        self.strip.setPixelColor(idx1, self.base_color)
-        self.strip.setPixelColor(idx2, self.base_color)
+        dot_width = int(self.num_pixels * 0.1)
+        # Calculate start index based on progress. Limit to range that makes dots collide but not "cross".
+        start_idx = int(abs(0.5 - progress) * (self.num_pixels - dot_width))
+        self.strip[start_idx:(start_idx + dot_width)] = self.base_color
+        self.strip[(-start_idx - 1):(-start_idx - dot_width - 1): -1] = self.base_color
 
     def _pattern_charging(self, elapsed, soc):
         # Moving bar indicating charge level
-        period = 3.0
-        progress = (elapsed % period) / period
+        animation_period = 3.0
+        total_period = animation_period + 1.0  # 1s constant at the end
+        progress = min(1, (elapsed % total_period) / animation_period)
         target_num = int(soc * self.num_pixels)
         current_num = int(progress * self.num_pixels)
 
@@ -196,21 +204,16 @@ class LedManager:
                 self.strip.setPixelColor(i, Color(0, 0, 0))
 
     def _pattern_shutdown(self, elapsed):
-        # Light down from edges to center. Leave center LED (LEDs if there's an even number) on until power is cut
+        # Light down from edges to center. Leave 10% of pixels in the center on until power is cut
         duration = 2.0
         progress = min(elapsed / duration, 1.0)
         center = self.num_pixels / 2.0
         remaining = (1.0 - progress) * (self.num_pixels / 2.0)
-        partial_brightness = remaining - int(remaining)
+        center_width = max(1, int(self.num_pixels * 0.1))
         for i in range(self.num_pixels):
-            dist = abs(i + 0.5 - center)
+            dist = abs(i + 0.5 - center) - (center_width / 2)
             if dist <= remaining:
                 self.strip.setPixelColor(i, self.base_color)
-            elif dist - 1 < remaining and partial_brightness > 0:
-                r = int(self.base_color.r * partial_brightness)
-                g = int(self.base_color.g * partial_brightness)
-                b = int(self.base_color.b * partial_brightness)
-                self.strip.setPixelColor(i, Color(r, g, b))
             else:
                 self.strip.setPixelColor(i, Color(0, 0, 0))
 
