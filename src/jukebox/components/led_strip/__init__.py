@@ -1,5 +1,5 @@
 import logging
-import jukebox.plugs as plugs
+import jukebox.plugs as plugin
 import jukebox.cfghandler
 from components.led_strip.led_strip_manager import LedStripManager
 import time
@@ -10,7 +10,7 @@ cfg = jukebox.cfghandler.get_handler('jukebox')
 led_strip_manager = None
 
 
-@plugs.initialize
+@plugin.initialize
 def initialize():
     global led_strip_manager
     logger.info("Initializing LED Strip Plugin (Proxy Mode)")
@@ -31,12 +31,8 @@ def initialize():
     led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color))
     led_strip_manager.start()
 
-    if led_strip_manager:
-        # Register the control instance
-        plugs.register(led_strip_manager, name='ctrl')
 
-
-@plugs.atexit
+@plugin.atexit
 def atexit(signal_id: int, **ignored_kwargs):
     global led_strip_manager
     if led_strip_manager:
@@ -48,17 +44,17 @@ def atexit(signal_id: int, **ignored_kwargs):
         led_strip_manager.join()
 
 
-@plugs.register
+@plugin.register
 def show_battery():
     """Manually trigger battery level display."""
     global led_strip_manager
     if led_strip_manager:
-        status = plugs.call_ignore_errors('battmon', 'batt_mon', 'get_batt_status')
+        status = plugin.call_ignore_errors('battmon', 'batt_mon', 'get_batt_status')
         if status:
             led_strip_manager._trigger_overlay('battery', status.get('soc', 0) / 100, duration=5)
 
 
-@plugs.register
+@plugin.register
 def toggle_night_mode():
     """Toggle night mode manually."""
     # TODO: Implement night mode logic
