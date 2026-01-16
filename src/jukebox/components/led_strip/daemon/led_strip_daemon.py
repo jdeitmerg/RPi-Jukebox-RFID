@@ -16,14 +16,49 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger('led_strip_daemon')
 
 
+class VirtualPixelStrip(PixelStrip):
+    def __init__(self, num, pin, freq_hz=800000, dma=10, invert=False,
+                 brightness=255, channel=0, strip_type=None, gamma=None, pixels_per_led=10):
+        super().__init__(num, pin, freq_hz, dma, invert, brightness, channel, strip_type, gamma)
+        self.num_leds = num
+        self.pixels_per_led = pixels_per_led
+        self.pixels = [Color(0, 0, 0)] * (num * pixels_per_led)
+
+    def __getitem__(self, index):
+        return self.pixels[index]
+
+    def __setitem__(self, index, color):
+        self.pixels[index] = color
+
+    def __len__(self):
+        return len(self.pixels)
+
+    def _downsample(self):
+        for i in range(self.num_leds):
+            r_total, g_total, b_total = 0, 0, 0
+            for j in range(self.pixels_per_led):
+                color = self.pixels[i * self.pixels_per_led + j]
+                r_total += color.r
+                g_total += color.g
+                b_total += color.b
+            r_avg = int(r_total / self.pixels_per_led)
+            g_avg = int(g_total / self.pixels_per_led)
+            b_avg = int(b_total / self.pixels_per_led)
+            super().__setitem__(i, Color(r_avg, g_avg, b_avg))
+
+    def show(self):
+        self._downsample()
+        super().show()
+
+
 class LedManager:
     def __init__(self, num_leds, pin, base_color, brightness=50):
         self.cur_animation = None
         self.anim_start_time = 0
         self.anim_data = {}
         self.lock = threading.Lock()
-        self.num_leds = num_leds
-        self.strip = PixelStrip(num_leds, pin, brightness=brightness)
+        self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=20)
+        self.num_pixels = len(self.strip)
         self.strip.begin()
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
 
@@ -33,7 +68,7 @@ class LedManager:
         with self.lock:
             self.cur_animation = None
             color = Color(r, g, b)
-            for i in range(self.num_leds):
+            for i in range(self.num_pixels):
                 self.strip.setPixelColor(i, color)
             self.strip.show()
             logger.debug(f"Set solid color: ({r}, {g}, {b})")
@@ -41,18 +76,18 @@ class LedManager:
     def set_bar(self, ratio, r, g, b):
         with self.lock:
             self.cur_animation = None
-            num_lit = int(ratio * self.num_leds)
+            num_lit = int(ratio * self.num_pixels)
             # One LED might not be fully lit to create a smoother effect
-            partial_brightness = ratio * self.num_leds - num_lit
+            partial_brightness = ratio * self.num_pixels - num_lit
             color = Color(r, g, b)
             for i in range(num_lit):
                 self.strip.setPixelColor(i, color)
-            if num_lit < self.num_leds:
+            if num_lit < self.num_pixels:
                 r_c = int(((color >> 16) & 0xFF) * partial_brightness)
                 g_c = int(((color >> 8) & 0xFF) * partial_brightness)
                 b_c = int((color & 0xFF) * partial_brightness)
                 self.strip.setPixelColor(num_lit, Color(r_c, g_c, b_c))
-            for i in range(num_lit + 1, self.num_leds):
+            for i in range(num_lit + 1, self.num_pixels):
                 self.strip.setPixelColor(i, Color(0, 0, 0))
             self.strip.show()
             logger.debug(f"Set bar: {ratio * 100}%")
@@ -91,13 +126,13 @@ class LedManager:
 
     def _pattern_ready(self, elapsed):
         # First 1.5s: light up from center outwards. Then quick pulses.
-        center = self.num_leds / 2.0
+        center = self.num_pixels / 2.0
         if elapsed < 1.5:
             # Light up bar from center outwards
             progress = elapsed / 1.5
-            for i in range(self.num_leds):
+            for i in range(self.num_pixels):
                 dist = abs(i + 0.5 - center)
-                if dist < progress * (self.num_leds / 2.0):
+                if dist < progress * (self.num_pixels / 2.0):
                     self.strip.setPixelColor(i, self.base_color)
                 else:
                     self.strip.setPixelColor(i, Color(0, 0, 0))
@@ -109,18 +144,18 @@ class LedManager:
             r = int(self.base_color.r * brightness)
             g = int(self.base_color.g * brightness)
             b = int(self.base_color.b * brightness)
-            for i in range(self.num_leds):
+            for i in range(self.num_pixels):
                 self.strip.setPixelColor(i, Color(r, g, b))
 
     def _pattern_sync(self, elapsed):
         # Moving dots from edges to center and back
-        for i in range(self.num_leds):
+        for i in range(self.num_pixels):
             self.strip.setPixelColor(i, Color(0, 0, 0))
         period = 2.0
         progress = (elapsed % period) / period
         pos = abs(0.5 - progress) * 2.0
-        idx1 = int(pos * (self.num_leds / 2.0 - 0.5))
-        idx2 = self.num_leds - 1 - idx1
+        idx1 = int(pos * (self.num_pixels / 2.0 - 0.5))
+        idx2 = self.num_pixels - 1 - idx1
         self.strip.setPixelColor(idx1, self.base_color)
         self.strip.setPixelColor(idx2, self.base_color)
 
@@ -128,21 +163,17 @@ class LedManager:
         # Moving bar indicating charge level
         period = 3.0
         progress = (elapsed % period) / period
-        target_num = int(soc * self.num_leds)
-        current_num = int(progress * self.num_leds)
+        target_num = int(soc * self.num_pixels)
+        current_num = int(progress * self.num_pixels)
 
-        # Dim background. Again don't use strip.setBrightness to avoid resetting later
-        r_bg = int(self.base_color.r * 0.1)
-        g_bg = int(self.base_color.g * 0.1)
-        b_bg = int(self.base_color.b * 0.1)
-        for i in range(self.num_leds):
+        for i in range(self.num_pixels):
             if i < current_num and i < target_num:
                 self.strip.setPixelColor(i, self._battery_color(i))
             else:
-                self.strip.setPixelColor(i, Color(r_bg, g_bg, b_bg))
+                self.strip.setPixelColor(i, Color(0, 0, 0))
 
     def _battery_color(self, index_from_right, scale=1.0):
-        ratio = (index_from_right + 1) / self.num_leds
+        ratio = (index_from_right + 1) / self.num_pixels
         if ratio <= 0.2:
             r, g, b = 255, 0, 0
         elif ratio <= 0.4:
@@ -153,10 +184,10 @@ class LedManager:
 
     def _render_battery_bar(self, ratio):
         ratio = max(0.0, min(1.0, ratio))
-        num_lit = int(ratio * self.num_leds)
-        partial_brightness = ratio * self.num_leds - num_lit
+        num_lit = int(ratio * self.num_pixels)
+        partial_brightness = ratio * self.num_pixels - num_lit
 
-        for i in range(self.num_leds):
+        for i in range(self.num_pixels):
             if i < num_lit:
                 self.strip.setPixelColor(i, self._battery_color(i))
             elif i == num_lit and partial_brightness > 0:
@@ -168,10 +199,10 @@ class LedManager:
         # Light down from edges to center. Leave center LED (LEDs if there's an even number) on until power is cut
         duration = 2.0
         progress = min(elapsed / duration, 1.0)
-        center = self.num_leds / 2.0
-        remaining = (1.0 - progress) * (self.num_leds / 2.0)
+        center = self.num_pixels / 2.0
+        remaining = (1.0 - progress) * (self.num_pixels / 2.0)
         partial_brightness = remaining - int(remaining)
-        for i in range(self.num_leds):
+        for i in range(self.num_pixels):
             dist = abs(i + 0.5 - center)
             if dist <= remaining:
                 self.strip.setPixelColor(i, self.base_color)
