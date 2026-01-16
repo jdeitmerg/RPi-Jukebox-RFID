@@ -195,13 +195,10 @@ Night Mode affects all states.
 
 ## ToDo
 
-- Fix "Module components.led_strip.led_strip_manager not loaded as plugin" error
-- Ignore volume update on boot
 - Night mode
 - `invert_direction` configuration flag
 - Battery bar sections (red, yellow, green)
 - Battery alert
 - Test all states defined above
-- Manage daemon from within main application
 - Implement proper interpolation for smooth patterns
 - Refactor priority scheme

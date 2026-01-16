@@ -9,7 +9,7 @@ import os
 import grp
 from rpi_ws281x import Color, PixelStrip
 
-SOCKET_PATH = "daemon.sock"
+SOCKET_PATH = '/tmp/led_strip_daemon.sock'
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

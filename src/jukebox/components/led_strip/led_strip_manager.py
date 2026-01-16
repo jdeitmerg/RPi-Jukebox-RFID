@@ -12,7 +12,7 @@ logger = logging.getLogger('jb.led_strip.manager')
 cfg = jukebox.cfghandler.get_handler('jukebox')
 
 DAEMON_DIR = __file__.replace('led_strip_manager.py', 'daemon')
-SOCKET_PATH = f'{DAEMON_DIR}/daemon.sock'
+SOCKET_PATH = '/tmp/led_strip_daemon.sock'
 
 # State priorities (used as state ID )
 PRIO_IDLE = 10
@@ -72,7 +72,11 @@ class LedStripManager(threading.Thread):
                                               '--brightness', str(self.brightness),
                                               '--base-color', ','.join(map(str, self.base_color))],
                                               stdout=subprocess.DEVNULL,  # Suppress output to avoid cluttering logs
-                                              stderr=subprocess.DEVNULL)
+                                              stderr=subprocess.DEVNULL,
+                                              # If stdin is not redirected as well, the console log of the jukebox app is
+                                              # messed up (looks like carriage return missing on Windows). Even if all output
+                                              # is removed from the run_daemon.sh script.
+                                              stdin=subprocess.DEVNULL)
 
     def _poll_daemon(self):
         # Check if daemon is running
