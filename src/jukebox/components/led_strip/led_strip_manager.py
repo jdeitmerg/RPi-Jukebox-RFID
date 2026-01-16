@@ -27,7 +27,6 @@ PRIO_SHUTDOWN = 100
 class LedStripManager(threading.Thread):
     def __init__(self, num_leds=16, pin=12, brightness=50, base_color=(255, 255, 255)):
         super().__init__(name='LedStripManager')
-        self.daemon = True  # Make sure thread exits with main program
         self._keep_running = True
         self.daemon_proc = None
         self.num_leds = num_leds
@@ -35,7 +34,7 @@ class LedStripManager(threading.Thread):
         self.brightness = brightness
         self.base_color = base_color
         self.lock = threading.Lock()
-        self.socket = None
+        self.daemon_socket = None
         self.ts_start = time.monotonic()
 
         with self.lock:
@@ -82,26 +81,26 @@ class LedStripManager(threading.Thread):
         # Check if daemon is running
         try:
             logger.debug('Pinging LED daemon...')
-            self.socket.send_string(json.dumps({'method': 'ping'}))
-            self.socket.recv_string()
+            self.daemon_socket.send_string(json.dumps({'method': 'ping'}))
+            self.daemon_socket.recv_string()
             return True
         except Exception:
             return False
 
     def _socket_connect(self):
-        if self.socket:
-            self.socket.close()
-        self.socket = self.context.socket(zmq.REQ)
+        if self.daemon_socket:
+            self.daemon_socket.close()
+        self.daemon_socket = self.context.socket(zmq.REQ)
         logger.debug(f'Connecting to LED daemon socket at ipc://{SOCKET_PATH}...')
-        self.socket.connect(f'ipc://{SOCKET_PATH}')
-        self.socket.setsockopt(zmq.LINGER, 500)
-        self.socket.setsockopt(zmq.RCVTIMEO, 1000)
+        self.daemon_socket.connect(f'ipc://{SOCKET_PATH}')
+        self.daemon_socket.setsockopt(zmq.LINGER, 500)
+        self.daemon_socket.setsockopt(zmq.RCVTIMEO, 1000)
 
     def _rpc_call(self, method, params=None):
         with self.lock:
             try:
-                self.socket.send_string(json.dumps({'method': method, 'params': params or {}}))
-                self.socket.recv_string()  # Wait for ack
+                self.daemon_socket.send_string(json.dumps({'method': method, 'params': params or {}}))
+                self.daemon_socket.recv_string()  # Wait for ack
             except Exception as e:
                 logger.error(f'Failed to call LED daemon: {e}')
                 # Reconnect on error
@@ -216,7 +215,7 @@ class LedStripManager(threading.Thread):
 
     def stop(self):
         self._keep_running = False
-        self.socket.close()
+        self.daemon_socket.close()
         self.context.term()
         if self.daemon_proc:
             self.daemon_proc.terminate()
