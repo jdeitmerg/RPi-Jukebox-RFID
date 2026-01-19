@@ -73,6 +73,9 @@ class LedManager:
 
         logger.info(f"LED Daemon initialized on pin {pin} with {num_leds} LEDs")
 
+    def animation_active(self):
+        return self.cur_animation is not None
+
     def _init_lookup_tables(self):
         self._battery_lookup = []
         for i in range(self.num_pixels):
@@ -213,7 +216,6 @@ class MsgHandler():
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)
         self.socket.bind(f'ipc://{SOCKET_PATH}')
-        self.socket.setsockopt(zmq.RCVTIMEO, 50)  # 50ms timeout for non-blocking receive -> 20 FPS update rate
         # Make sure users other than root can access the newly created socket
         group = grp.getgrnam('users').gr_gid
         os.chown(SOCKET_PATH, 0, group)  # 0 is root uid
@@ -259,6 +261,12 @@ class MsgHandler():
             exit(0)
 
     def receive_and_process(self):
+        # Adjust sleep time (via socket timeout) based on whether an animation is active
+        if self.led_mgr.animation_active():
+            self.socket.setsockopt(zmq.RCVTIMEO, 50)  # 50ms timeout -> 20 FPS update rate
+        else:
+            # 10s timeout when idle, only for updating LEDs in case they are corrupted
+            self.socket.setsockopt(zmq.RCVTIMEO, 10000)
         try:
             message = self.socket.recv_string()
             request = json.loads(message)
