@@ -29,7 +29,7 @@ class LedState(Enum):
 
 
 class LedStripManager(threading.Thread):
-    def __init__(self, num_leds=16, pin=12, brightness=50, base_color=(255, 255, 255)):
+    def __init__(self, num_leds=16, pin=12, brightness=20, base_color=(255, 255, 255)):
         super().__init__(name='LedStripManager')
         self._keep_running = True
         self.daemon_proc = None

@@ -276,15 +276,14 @@ def main():
     parser = argparse.ArgumentParser(description="LED Strip Daemon")
     parser.add_argument("--pin", type=int, default=12, help="GPIO pin to which the LED strip is connected")
     parser.add_argument("--num-leds", type=int, default=16, help="Number of LEDs in the strip")
-    parser.add_argument("--brightness", type=int, default=50, help="Brightness of the LED strip (0-100)")
+    parser.add_argument("--brightness", type=int, default=20, help="Brightness of the LED strip (0-100)")
     parser.add_argument("--base-color", type=str, default="255,255,255", help="Base color in R,G,B format")
     args = parser.parse_args()
 
     led_mgr = LedManager(
         num_leds=args.num_leds,
         pin=args.pin,
-        brightness=args.brightness,
-        base_color=dict(zip(['r', 'g', 'b'], map(int, args.base_color.split(','))))
+        brightness=int(args.brightness / 100 * 255),
     )
 
     with MsgHandler(led_mgr) as handler:

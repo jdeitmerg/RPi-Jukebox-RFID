@@ -167,5 +167,4 @@ led_strip:
   enable: true
   num_leds: 9
   pin: 12
-  brightness: 50
-  base_color: [255, 100, 0]
+  brightness: 20
