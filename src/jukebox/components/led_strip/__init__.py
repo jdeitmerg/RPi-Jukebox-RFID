@@ -24,11 +24,12 @@ def initialize():
     pin = cfg.setndefault('led_strip', 'pin', value=12)
     brightness = cfg.setndefault('led_strip', 'brightness', value=50)
     base_color = cfg.setndefault('led_strip', 'base_color', value=[255, 255, 255])
+    reverse_direction = cfg.setndefault('led_strip', 'reverse_direction', value=False)
 
     logging.debug(f"LED Strip Config - num_leds: {num_leds}, pin: {pin}, "
-                    f"brightness: {brightness}, base_color: {base_color}")
+                    f"brightness: {brightness}, base_color: {base_color}, reverse_direction: {reverse_direction}")
 
-    led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color))
+    led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color), reverse_direction=reverse_direction)
     led_strip_manager.start()
 
 

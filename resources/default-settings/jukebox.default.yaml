@@ -167,4 +167,11 @@ led_strip:
   enable: true
   num_leds: 9
   pin: 12
+  reverse_direction: true
   brightness: 20
+  base_color: [led_strip_base_color_placeholder] # "led_strip_base_color_placeholder" is replaced during bulk-flashing by customize_jukebox_conf.sh
+  night_mode:
+    enable: true
+    start: "18:00:00"
+    end: "07:00:00"
+    brightness: 5

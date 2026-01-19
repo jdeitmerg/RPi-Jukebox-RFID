@@ -29,7 +29,7 @@ class LedState(Enum):
 
 
 class LedStripManager(threading.Thread):
-    def __init__(self, num_leds=16, pin=12, brightness=20, base_color=(255, 255, 255)):
+    def __init__(self, num_leds=16, pin=12, brightness=20, base_color=(255, 255, 255), reverse_direction=False):
         super().__init__(name='LedStripManager')
         self._keep_running = True
         self.daemon_proc = None
@@ -39,6 +39,7 @@ class LedStripManager(threading.Thread):
         self.base_color = dict(zip(['r', 'g', 'b'], base_color))
         self.lock = threading.Lock()
         self.daemon_socket = None
+        self.reverse_direction = reverse_direction
         self.ts_start = time.monotonic()
 
         with self.lock:
@@ -71,17 +72,20 @@ class LedStripManager(threading.Thread):
         ])
 
     def _start_daemon(self):
-        self.daemon_proc = subprocess.Popen(['sudo', f'{DAEMON_DIR}/run_daemon.sh',
-                                              '--num-leds', str(self.num_leds),
-                                              '--pin', str(self.pin),
-                                              '--brightness', str(self.brightness),
-                                              '--base-color', ','.join(str(v) for v in self.base_color.values())],
-                                              stdout=subprocess.DEVNULL,  # Suppress output to avoid cluttering logs
-                                              stderr=subprocess.DEVNULL,
-                                              # start_new_session makes sure the process is not killed immediately when the
-                                              # main app receives SIGINT/SIGTERM. It also stops the log from getting messed up
-                                              # (looking like carriage return missing on Windows).
-                                              start_new_session=True)
+        args = ['sudo', f'{DAEMON_DIR}/run_daemon.sh',
+                '--num-leds', str(self.num_leds),
+                '--pin', str(self.pin),
+                '--brightness', str(self.brightness),
+                '--base-color', ','.join(str(v) for v in self.base_color.values())]
+        if self.reverse_direction:
+            args.append('--reverse_direction')
+        self.daemon_proc = subprocess.Popen(args,
+                                            stdout=subprocess.DEVNULL,  # Suppress output to avoid cluttering logs
+                                            stderr=subprocess.DEVNULL,
+                                            # start_new_session makes sure the process is not killed immediately when the
+                                            # main app receives SIGINT/SIGTERM. It also stops the log from getting messed up
+                                            # (looking like carriage return missing on Windows).
+                                            start_new_session=True)
 
     def _poll_daemon(self):
         # Check if daemon is running

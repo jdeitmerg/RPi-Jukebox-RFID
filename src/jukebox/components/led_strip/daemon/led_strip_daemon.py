@@ -17,13 +17,16 @@ logger = logging.getLogger('led_strip_daemon')
 
 
 class VirtualPixelStrip(PixelStrip):
-    ''' A virtual pixel strip that uses multiple virtual pixels per real LED for smoother animations.'''
+    ''' A virtual pixel strip that uses multiple virtual pixels per real LED for smoother animations.
+        Also adds reversing functionality.
+    '''
     def __init__(self, num, pin, freq_hz=800000, dma=10, invert=False,
-                 brightness=255, channel=0, strip_type=None, gamma=None, pixels_per_led=10):
+                 brightness=255, channel=0, strip_type=None, gamma=None, pixels_per_led=10, reverse=False):
         super().__init__(num, pin, freq_hz, dma, invert, brightness, channel, strip_type, gamma)
         self.num_leds = num
         self.pixels_per_led = pixels_per_led
         self.pixels = [Color(0, 0, 0)] * (num * pixels_per_led)
+        self.reverse = reverse
 
     def __getitem__(self, index):
         return self.pixels[index]
@@ -41,7 +44,9 @@ class VirtualPixelStrip(PixelStrip):
         return len(self.pixels)
 
     def _downsample(self):
-        ''' Downsample virtual pixels to real LEDs by averaging colors. '''
+        ''' Downsample virtual pixels to real LEDs by averaging colors.
+            Reverse order if needed.
+        '''
         for i in range(self.num_leds):
             r_total, g_total, b_total = 0, 0, 0
             for j in range(self.pixels_per_led):
@@ -52,7 +57,8 @@ class VirtualPixelStrip(PixelStrip):
             r_avg = int(r_total / self.pixels_per_led)
             g_avg = int(g_total / self.pixels_per_led)
             b_avg = int(b_total / self.pixels_per_led)
-            super().__setitem__(i, Color(r_avg, g_avg, b_avg))
+            target_idx = self.num_leds - 1 - i if self.reverse else i
+            super().__setitem__(target_idx, Color(r_avg, g_avg, b_avg))
 
     def show(self):
         self._downsample()
@@ -60,12 +66,12 @@ class VirtualPixelStrip(PixelStrip):
 
 
 class LedManager:
-    def __init__(self, num_leds, pin, base_color, brightness=50):
+    def __init__(self, num_leds, pin, base_color, brightness=50, reverse_direction=False):
         self.cur_animation = None
         self.anim_start_time = 0
         self.anim_data = {}
         self.lock = threading.Lock()
-        self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=20)
+        self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=10, reverse=reverse_direction)
         self.num_pixels = len(self.strip)
         self.strip.begin()
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
@@ -278,12 +284,15 @@ def main():
     parser.add_argument("--num-leds", type=int, default=16, help="Number of LEDs in the strip")
     parser.add_argument("--brightness", type=int, default=20, help="Brightness of the LED strip (0-100)")
     parser.add_argument("--base-color", type=str, default="255,255,255", help="Base color in R,G,B format")
+    parser.add_argument("--reverse_direction", action='store_true', help="Reverses the direction of all patterns")
     args = parser.parse_args()
 
     led_mgr = LedManager(
         num_leds=args.num_leds,
         pin=args.pin,
         brightness=int(args.brightness / 100 * 255),
+        base_color=dict(zip(['r', 'g', 'b'], map(int, args.base_color.split(',')))),
+        reverse_direction=args.reverse_direction
     )
 
     with MsgHandler(led_mgr) as handler:
