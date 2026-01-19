@@ -72,6 +72,9 @@ class LedManager:
         self.cur_animation = None
         self.anim_start_time = 0
         self.anim_data = {}
+        self.fade_start_time = None
+        self.fade_start_brightness = None
+        self.fade_target_brightness = None
         self.lock = threading.Lock()
         self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=20, reverse=reverse_direction)
         self.num_pixels = len(self.strip)
@@ -79,7 +82,8 @@ class LedManager:
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
         self._init_lookup_tables()
 
-        logger.info(f"LED Daemon initialized on pin {pin} with {num_leds} LEDs")
+        logger.info(f"LED Daemon initialized on pin {pin} with {num_leds} LEDs, brightness {brightness}/255, "
+                    f"reverse_direction={reverse_direction}")
 
     def animation_active(self):
         return self.cur_animation is not None
@@ -133,6 +137,12 @@ class LedManager:
             self.anim_data = data or {}
             logger.info(f"Started animation: {name}")
 
+    def start_fade(self, target_brightness):
+        self.fade_start_time = time.monotonic()
+        self.fade_target_brightness = target_brightness
+        self.fade_start_brightness = self.strip.getBrightness()
+        logger.debug(f"Started fade to brightness: {target_brightness}/255")
+
     def update_animation(self):
         if not self.cur_animation:
             return
@@ -148,6 +158,8 @@ class LedManager:
                     self._pattern_shutdown(elapsed)
                 case 'charging':
                     self._pattern_charging(elapsed, self.anim_data.get('soc', 0))
+
+            self._fade()
 
             self.strip.show()
 
@@ -213,6 +225,23 @@ class LedManager:
         self.strip[pattern_start:pattern_end] = self.base_color
         self.strip[pattern_end:] = Color(0, 0, 0)
 
+    def _fade(self):
+        if self.fade_start_time is None or self.fade_target_brightness is None:
+            return
+
+        elapsed = time.monotonic() - self.fade_start_time
+        duration = 2.0
+        if elapsed >= duration:
+            brightness = self.fade_target_brightness
+            self.fade_start_time = None
+            self.fade_target_brightness = None
+            logger.debug(f"Fade completed to brightness: {brightness}/255")
+        else:
+            offset = elapsed / duration * (self.fade_target_brightness - self.fade_start_brightness)
+            brightness = self.fade_start_brightness + offset
+
+        self.strip.setBrightness(max(0, min(255, int(brightness))))
+
 
 class MsgHandler():
     def __init__(self, led_mgr):
@@ -254,6 +283,8 @@ class MsgHandler():
                 self.led_mgr.start_animation(params.get('name'), params.get('data'))
             case 'stop_animation':
                 self.led_mgr.cur_animation = None
+            case 'start_fade':
+                self.led_mgr.start_fade(int(params.get('brightness', 50) / 100 * 255))
             case 'ping':
                 pass  # Just respond with 'ok'
             case 'exit':

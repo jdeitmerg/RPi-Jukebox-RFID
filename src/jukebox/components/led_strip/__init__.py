@@ -3,6 +3,7 @@ import jukebox.plugs as plugin
 import jukebox.cfghandler
 from components.led_strip.led_strip_manager import LedStripManager
 import time
+from datetime import time as dtime
 
 logger = logging.getLogger('jb.led_strip')
 cfg = jukebox.cfghandler.get_handler('jukebox')
@@ -25,11 +26,23 @@ def initialize():
     brightness = cfg.setndefault('led_strip', 'brightness', value=50)
     base_color = cfg.setndefault('led_strip', 'base_color', value=[255, 255, 255])
     reverse_direction = cfg.setndefault('led_strip', 'reverse_direction', value=False)
+    nightmode_enable = cfg.setndefault('led_strip', 'night_mode', 'enable', value=False)
+    nightmode_start = cfg.setndefault('led_strip', 'night_mode', 'start', value="18:00:00")
+    nightmode_end = cfg.setndefault('led_strip', 'night_mode', 'end', value="07:00:00")
+    nightmode_brightness = cfg.setndefault('led_strip', 'night_mode', 'brightness', value=5)
 
-    logging.debug(f"LED Strip Config - num_leds: {num_leds}, pin: {pin}, "
-                    f"brightness: {brightness}, base_color: {base_color}, reverse_direction: {reverse_direction}")
+    logger.debug(f"LED Strip Config - num_leds: {num_leds}, pin: {pin}, "
+                 f"brightness: {brightness}, base_color: {base_color}, reverse_direction: {reverse_direction}, "
+                 f"nightmode_enable: {nightmode_enable}, nightmode_start: {nightmode_start}, "
+                 f"nightmode_end: {nightmode_end}, nightmode_brightness: {nightmode_brightness}")
 
-    led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color), reverse_direction=reverse_direction)
+    if nightmode_enable:
+        nightmode_times = (dtime.fromisoformat(nightmode_start), dtime.fromisoformat(nightmode_end))
+    else:
+        nightmode_times = None
+
+    led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color), reverse_direction, nightmode_times,
+                                        nightmode_brightness)
     led_strip_manager.start()
 
 

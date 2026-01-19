@@ -8,6 +8,7 @@ import subprocess
 import jukebox.publishing.subscriber as subscriber
 import jukebox.cfghandler
 import jukebox.plugs as plugin
+from datetime import datetime
 
 logger = logging.getLogger('jb.led_strip.manager')
 cfg = jukebox.cfghandler.get_handler('jukebox')
@@ -29,18 +30,38 @@ class LedState(Enum):
 
 
 class LedStripManager(threading.Thread):
-    def __init__(self, num_leds=16, pin=12, brightness=20, base_color=(255, 255, 255), reverse_direction=False):
+    def __init__(self, num_leds=16, pin=12, brightness=20, base_color=(255, 255, 255), reverse_direction=False,
+                 nightmode_times=None, nightmode_brightness=5):
+        ''' Manages the LED strip daemon process and communicates with it via RPC.
+        Args:
+            num_leds (int): Number of LEDs in the strip.
+            pin (int): GPIO pin connected to the LED strip.
+            brightness (int): Brightness level (0-100).
+            base_color (tuple): Base color as (r, g, b).
+            reverse_direction (bool): Whether to reverse the LED strip direction.
+            nightmode_times (tuple): Optional tuple of (start_time, end_time) for night
+                mode. Both need to be of type datetime.time.
+            nightmode_brightness (int): Brightness level (0-100) during night mode.
+        '''
+        logger.debug('Initializing LedStripManager with parameters: '
+                     f'num_leds={num_leds}, pin={pin}, brightness={brightness}, '
+                     f'base_color={base_color}, reverse_direction={reverse_direction}, '
+                     f'nightmode_times={nightmode_times}, nightmode_brightness={nightmode_brightness}')
         super().__init__(name='LedStripManager')
         self._keep_running = True
         self.daemon_proc = None
         self.num_leds = num_leds
         self.pin = pin
-        self.brightness = brightness
         self.base_color = dict(zip(['r', 'g', 'b'], base_color))
         self.lock = threading.Lock()
         self.daemon_socket = None
         self.reverse_direction = reverse_direction
         self.ts_start = time.monotonic()
+        self.nightmode_times = nightmode_times
+        self.nightmode_brightness = nightmode_brightness
+        self.daymode_brightness = brightness
+        self.nightmode = self._is_night()
+        self.brightness = nightmode_brightness if self.nightmode else brightness
 
         with self.lock:
             self._start_daemon()
@@ -70,6 +91,23 @@ class LedStripManager(threading.Thread):
         self.sub = subscriber.Subscriber('inproc://PublisherToProxy', [
             'volume.level', 'sync.status', 'batt_status'
         ])
+
+    def _is_night(self):
+        if not self.nightmode_times:
+            return False
+        now = datetime.now().time()
+        night_start, night_end = self.nightmode_times
+        return now >= night_start or now < night_end
+
+    def _update_nightmode(self):
+        if not self.nightmode_times:
+            return
+        nightmode = self._is_night()
+        if nightmode != self.nightmode:
+            self.nightmode = nightmode
+            self.brightness = self.nightmode_brightness if nightmode else self.daymode_brightness
+            logger.info(f'Night mode {"enabled" if nightmode else "disabled"}, fading brightness to {self.brightness}')
+            self._rpc_call('start_fade', {'brightness': self.brightness})
 
     def _start_daemon(self):
         args = ['sudo', f'{DAEMON_DIR}/run_daemon.sh',
@@ -139,7 +177,9 @@ class LedStripManager(threading.Thread):
             if LedState.READY in self.layers and now - self.overlay_start_time > 3.0:
                 self.layers.remove(LedState.READY)
 
-            self._update_daemon()
+            self._update_nightmode()
+
+            self._update_daemon_state()
 
     def _handle_event(self, topic, payload):
         logger.debug(f'Received event on topic "{topic}": {payload}')
@@ -164,7 +204,7 @@ class LedStripManager(threading.Thread):
         self.overlay_timeout = duration
         self.overlay_start_time = time.monotonic()
         # Immediately update daemon to show overlay, as this can be called from outside the run() loop
-        self._update_daemon()
+        self._update_daemon_state()
 
     def _handle_battery(self, payload):
         soc = payload.get('soc', 0) / 100
@@ -192,7 +232,7 @@ class LedStripManager(threading.Thread):
         else:
             self.layers.discard(LedState.SYNC)
 
-    def _update_daemon(self):
+    def _update_daemon_state(self):
         show_state = max(self.layers, key=lambda s: s.value)
         show_state_data = self.layer_data.get(show_state)
         if (show_state, show_state_data) == self.current_state:
@@ -226,7 +266,8 @@ class LedStripManager(threading.Thread):
 
     def trigger_shutdown(self):
         self.layers.add(LedState.SHUTDOWN)
-        self._update_daemon()
+        # Immediately update daemon to show animation, as this can be called from outside the run() loop
+        self._update_daemon_state()
 
     def stop(self):
         self._keep_running = False
