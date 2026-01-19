@@ -77,23 +77,16 @@ class LedManager:
         return self.cur_animation is not None
 
     def _init_lookup_tables(self):
-        self._battery_lookup = []
-        for i in range(self.num_pixels):
-            ratio = (i + 1) / self.num_pixels
-            if ratio <= 0.2:
-                color = Color(255, 0, 0)
-            elif ratio <= 0.4:
-                color = Color(255, 255, 0)
-            else:
-                color = Color(0, 255, 0)
-            self._battery_lookup.append(color)
+        self._battery_lookup = [Color(255, 0, 0)] * int(self.num_pixels * 0.2)  # red up to 20%
+        self._battery_lookup += [Color(255, 255, 0)] * int(self.num_pixels * 0.2)  # yellow up to 40%
+        remaining_pixels = self.num_pixels - len(self._battery_lookup)
+        self._battery_lookup += [Color(0, 255, 0)] * remaining_pixels  # green up to 100%
 
     def set_solid(self, r, g, b):
         with self.lock:
             self.cur_animation = None
             color = Color(r, g, b)
-            for i in range(self.num_pixels):
-                self.strip.setPixelColor(i, color)
+            self.strip[:] = color
             self.strip.show()
             logger.debug(f"Set solid color: ({r}, {g}, {b})")
 
@@ -149,7 +142,7 @@ class LedManager:
             self.strip.show()
 
     def _pattern_ready(self, elapsed):
-        # First 1.5s: light up from center outwards. Then two quick pulses.
+        # First 1.5s: light up from center outwards. Then two quick pulses, ending at full brightness.
         center = self.num_pixels / 2.0
         if elapsed < 1.5:
             # Light up bar from center outwards
@@ -161,13 +154,16 @@ class LedManager:
             self.strip[pattern_end:] = Color(0, 0, 0)
         else:
             # Quick pulses
-            sub_elapsed = (elapsed - 1.5) % 0.7
-            brightness = abs(0.35 - sub_elapsed) / 0.35
-            # Scale colors instead of setting brightness directly to avoid having to reset the brightness later
-            r = int(self.base_color.r * brightness)
-            g = int(self.base_color.g * brightness)
-            b = int(self.base_color.b * brightness)
-            self.strip[:] = Color(r, g, b)
+            if (elapsed - 1.5) > 2.1:
+                self.strip[:] = self.base_color
+            else:
+                sub_elapsed = (elapsed - 1.5) % 0.7
+                brightness = abs(0.35 - sub_elapsed) / 0.35
+                # Scale colors instead of setting brightness directly to avoid having to reset the brightness later
+                r = int(self.base_color.r * brightness)
+                g = int(self.base_color.g * brightness)
+                b = int(self.base_color.b * brightness)
+                self.strip[:] = Color(r, g, b)
 
     def _pattern_sync(self, elapsed):
         # Moving dots (10% of pixels) from edges to center and back
@@ -239,9 +235,9 @@ class MsgHandler():
                 self.led_mgr.set_solid(params.get('r', 0), params.get('g', 0), params.get('b', 0))
             case'set_bar':
                 self.led_mgr.set_bar(params.get('ratio', 0),
-                                    params.get('r', 255),
-                                    params.get('g', 255),
-                                    params.get('b', 255))
+                                     params.get('r', 255),
+                                     params.get('g', 255),
+                                     params.get('b', 255))
             case 'set_battery':
                 self.led_mgr.set_battery_bar(params.get('ratio', 0))
             case 'start_animation':
