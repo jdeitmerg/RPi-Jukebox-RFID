@@ -101,8 +101,7 @@ class LedStripManager(threading.Thread):
         with self.lock:
             try:
                 self.daemon_socket.send_string(json.dumps({'method': method, 'params': params or {}}))
-                if method != 'exit':
-                    self.daemon_socket.recv_string()  # Wait for ack
+                self.daemon_socket.recv_string()  # Wait for ack
             except Exception as e:
                 logger.error(f'Failed to call LED daemon: {e}')
                 # Reconnect on error

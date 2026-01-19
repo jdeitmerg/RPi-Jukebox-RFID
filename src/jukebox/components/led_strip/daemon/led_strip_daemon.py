@@ -69,8 +69,21 @@ class LedManager:
         self.num_pixels = len(self.strip)
         self.strip.begin()
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
+        self._init_lookup_tables()
 
         logger.info(f"LED Daemon initialized on pin {pin} with {num_leds} LEDs")
+
+    def _init_lookup_tables(self):
+        self._battery_lookup = []
+        for i in range(self.num_pixels):
+            ratio = (i + 1) / self.num_pixels
+            if ratio <= 0.2:
+                color = Color(255, 0, 0)
+            elif ratio <= 0.4:
+                color = Color(255, 255, 0)
+            else:
+                color = Color(0, 255, 0)
+            self._battery_lookup.append(color)
 
     def set_solid(self, r, g, b):
         with self.lock:
@@ -110,40 +123,39 @@ class LedManager:
     def start_animation(self, name, data=None):
         with self.lock:
             self.cur_animation = name
-            self.anim_start_time = time.time()
+            self.anim_start_time = time.monotonic()
             self.anim_data = data or {}
             logger.info(f"Started animation: {name}")
 
     def update_animation(self):
+        if not self.cur_animation:
+            return
         with self.lock:
-            if not self.cur_animation:
-                return
+            elapsed = time.monotonic() - self.anim_start_time
 
-            elapsed = time.time() - self.anim_start_time
-
-            if self.cur_animation == 'ready':
-                self._pattern_ready(elapsed)
-            elif self.cur_animation == 'sync':
-                self._pattern_sync(elapsed)
-            elif self.cur_animation == 'shutdown':
-                self._pattern_shutdown(elapsed)
-            elif self.cur_animation == 'charging':
-                self._pattern_charging(elapsed, self.anim_data.get('soc', 0))
+            match self.cur_animation:
+                case 'ready':
+                    self._pattern_ready(elapsed)
+                case 'sync':
+                    self._pattern_sync(elapsed)
+                case 'shutdown':
+                    self._pattern_shutdown(elapsed)
+                case 'charging':
+                    self._pattern_charging(elapsed, self.anim_data.get('soc', 0))
 
             self.strip.show()
 
     def _pattern_ready(self, elapsed):
-        # First 1.5s: light up from center outwards. Then quick pulses.
+        # First 1.5s: light up from center outwards. Then two quick pulses.
         center = self.num_pixels / 2.0
         if elapsed < 1.5:
             # Light up bar from center outwards
             progress = elapsed / 1.5
-            for i in range(self.num_pixels):
-                dist = abs(i + 0.5 - center)
-                if dist < progress * (self.num_pixels / 2.0):
-                    self.strip.setPixelColor(i, self.base_color)
-                else:
-                    self.strip.setPixelColor(i, Color(0, 0, 0))
+            pattern_start = int(center - (progress * (self.num_pixels / 2.0)))
+            pattern_end = int(center + (progress * (self.num_pixels / 2.0)))
+            self.strip[:pattern_start] = Color(0, 0, 0)
+            self.strip[pattern_start:pattern_end] = self.base_color
+            self.strip[pattern_end:] = Color(0, 0, 0)
         else:
             # Quick pulses
             sub_elapsed = (elapsed - 1.5) % 0.7
@@ -152,8 +164,7 @@ class LedManager:
             r = int(self.base_color.r * brightness)
             g = int(self.base_color.g * brightness)
             b = int(self.base_color.b * brightness)
-            for i in range(self.num_pixels):
-                self.strip.setPixelColor(i, Color(r, g, b))
+            self.strip[:] = Color(r, g, b)
 
     def _pattern_sync(self, elapsed):
         # Moving dots (10% of pixels) from edges to center and back
@@ -171,51 +182,27 @@ class LedManager:
         animation_period = 3.0
         total_period = animation_period + 1.0  # 1s constant at the end
         progress = min(1, (elapsed % total_period) / animation_period)
-        target_num = int(soc * self.num_pixels)
-        current_num = int(progress * self.num_pixels)
-
-        for i in range(self.num_pixels):
-            if i < current_num and i < target_num:
-                self.strip.setPixelColor(i, self._battery_color(i))
-            else:
-                self.strip.setPixelColor(i, Color(0, 0, 0))
-
-    def _battery_color(self, index_from_right, scale=1.0):
-        ratio = (index_from_right + 1) / self.num_pixels
-        if ratio <= 0.2:
-            r, g, b = 255, 0, 0
-        elif ratio <= 0.4:
-            r, g, b = 255, 255, 0
-        else:
-            r, g, b = 0, 255, 0
-        return Color(int(r * scale), int(g * scale), int(b * scale))
+        # Stop fill-up animation at current SOC
+        self._render_battery_bar(min(soc, progress))
 
     def _render_battery_bar(self, ratio):
         ratio = max(0.0, min(1.0, ratio))
         num_lit = int(ratio * self.num_pixels)
-        partial_brightness = ratio * self.num_pixels - num_lit
 
-        for i in range(self.num_pixels):
-            if i < num_lit:
-                self.strip.setPixelColor(i, self._battery_color(i))
-            elif i == num_lit and partial_brightness > 0:
-                self.strip.setPixelColor(i, self._battery_color(i, partial_brightness))
-            else:
-                self.strip.setPixelColor(i, Color(0, 0, 0))
+        self.strip.pixels[:num_lit] = self._battery_lookup[:num_lit]
+        self.strip[num_lit:] = Color(0, 0, 0)
 
     def _pattern_shutdown(self, elapsed):
         # Light down from edges to center. Leave 10% of pixels in the center on until power is cut
         duration = 2.0
         progress = min(elapsed / duration, 1.0)
         center = self.num_pixels / 2.0
-        remaining = (1.0 - progress) * (self.num_pixels / 2.0)
-        center_width = max(1, int(self.num_pixels * 0.1))
-        for i in range(self.num_pixels):
-            dist = abs(i + 0.5 - center) - (center_width / 2)
-            if dist <= remaining:
-                self.strip.setPixelColor(i, self.base_color)
-            else:
-                self.strip.setPixelColor(i, Color(0, 0, 0))
+        pattern_width = max(0.1, 1.0 - progress) * self.num_pixels
+        pattern_start = int(center - (pattern_width / 2))
+        pattern_end = int(center + (pattern_width / 2))
+        self.strip[:pattern_start] = Color(0, 0, 0)
+        self.strip[pattern_start:pattern_end] = self.base_color
+        self.strip[pattern_end:] = Color(0, 0, 0)
 
 
 class MsgHandler():
@@ -226,7 +213,7 @@ class MsgHandler():
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)
         self.socket.bind(f'ipc://{SOCKET_PATH}')
-        self.socket.setsockopt(zmq.RCVTIMEO, 20)  # 20ms timeout for non-blocking receive
+        self.socket.setsockopt(zmq.RCVTIMEO, 50)  # 50ms timeout for non-blocking receive -> 20 FPS update rate
         # Make sure users other than root can access the newly created socket
         group = grp.getgrnam('users').gr_gid
         os.chown(SOCKET_PATH, 0, group)  # 0 is root uid
@@ -242,13 +229,10 @@ class MsgHandler():
         method = request.get('method')
         params = request.get('params', {})
 
+        logger.info(f"Processing method: {method} with params: {params}")
+
+        do_exit = False
         match method:
-            case 'init':
-                num_leds = params.get('num_leds', 16)
-                pin = params.get('pin', 12)
-                brightness = params.get('brightness', 50)
-                base_color = params.get('base_color', {'r': 255, 'g': 255, 'b': 255})
-                self.led_mgr.init(num_leds, pin, base_color, brightness)
             case 'set_solid':
                 self.led_mgr.set_solid(params.get('r', 0), params.get('g', 0), params.get('b', 0))
             case'set_bar':
@@ -258,19 +242,21 @@ class MsgHandler():
                                     params.get('b', 255))
             case 'set_battery':
                 self.led_mgr.set_battery_bar(params.get('ratio', 0))
-            case'start_animation':
+            case 'start_animation':
                 self.led_mgr.start_animation(params.get('name'), params.get('data'))
-            case'stop_animation':
+            case 'stop_animation':
                 self.led_mgr.cur_animation = None
             case 'ping':
                 pass  # Just respond with 'ok'
             case 'exit':
                 logger.info("Shutting down LED Daemon as per request")
-                os._exit(0)
+                do_exit = True
             case _:
                 logger.warning(f"Unknown method: {method}")
 
         self.socket.send_string(json.dumps({'status': 'ok'}))
+        if do_exit:
+            exit(0)
 
     def receive_and_process(self):
         try:
@@ -301,7 +287,7 @@ def main():
         logger.info("LED Daemon listening on IPC socket")
         while True:
             handler.receive_and_process()
-            time.sleep(0.01)  # Sleep even if we just processed a request
+            # Handler takes care of timing via socket timeout, no need to sleep here
     # Don't clear on exit to keep last state visible
 
 
