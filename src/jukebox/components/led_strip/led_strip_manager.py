@@ -231,10 +231,9 @@ class LedStripManager(threading.Thread):
     def stop(self):
         self._keep_running = False
         if self.daemon_proc:
-            logger.debug('Requesting LED daemon shutdown...')
+            logger.debug('Requesting LED daemon shutdown')
             # Can't use terminate(), as sudo was used to start the process, which creates a new process group.
             self._rpc_call('exit')
-            self.daemon_proc.wait()
-            logger.debug('LED daemon process terminated.')
+            # Don't wait for process to exit so we're not killed waiting. Better to let it shut down at its own pace.
         self.daemon_socket.close()
         self.context.term()
