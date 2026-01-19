@@ -126,8 +126,10 @@ class LedManager:
 
     def start_animation(self, name, data=None):
         with self.lock:
+            if self.cur_animation != name:
+                # Only restart if different animation. Otherwise only update data.
+                self.anim_start_time = time.monotonic()
             self.cur_animation = name
-            self.anim_start_time = time.monotonic()
             self.anim_data = data or {}
             logger.info(f"Started animation: {name}")
 
