@@ -19,9 +19,11 @@ logger = logging.getLogger('led_strip_daemon')
 class VirtualPixelStrip(PixelStrip):
     ''' A virtual pixel strip that uses multiple virtual pixels per real LED for smoother animations.
         Also adds reversing functionality.
+        The default of 20 pixels per LED was chosen so in the scenario of a pattern moving across 2 LEDs per second, a given
+        LED can change color up to 40 times per second. Otherwise even at 20 FPS there's a noticeable difference in smoothness.
     '''
     def __init__(self, num, pin, freq_hz=800000, dma=10, invert=False,
-                 brightness=255, channel=0, strip_type=None, gamma=None, pixels_per_led=10, reverse=False):
+                 brightness=255, channel=0, strip_type=None, gamma=None, pixels_per_led=20, reverse=False):
         super().__init__(num, pin, freq_hz, dma, invert, brightness, channel, strip_type, gamma)
         self.num_leds = num
         self.pixels_per_led = pixels_per_led
@@ -71,7 +73,7 @@ class LedManager:
         self.anim_start_time = 0
         self.anim_data = {}
         self.lock = threading.Lock()
-        self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=10, reverse=reverse_direction)
+        self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=20, reverse=reverse_direction)
         self.num_pixels = len(self.strip)
         self.strip.begin()
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
