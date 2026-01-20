@@ -41,3 +41,6 @@ pydoc-markdown
 
 # MQTT
 paho-mqtt
+
+# led_strip plugin
+rpi_ws281x
