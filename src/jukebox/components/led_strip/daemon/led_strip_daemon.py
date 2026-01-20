@@ -86,7 +86,7 @@ class LedManager:
                     f"reverse_direction={reverse_direction}")
 
     def animation_active(self):
-        return self.cur_animation is not None
+        return self.animation_cb is not None or self.fade_start_time is not None
 
     def _init_lookup_tables(self):
         self._battery_lookup = [Color(255, 0, 0)] * int(self.num_pixels * 0.2)  # red up to 20%
