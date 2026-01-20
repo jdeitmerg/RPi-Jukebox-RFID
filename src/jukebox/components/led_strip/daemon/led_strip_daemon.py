@@ -69,7 +69,7 @@ class VirtualPixelStrip(PixelStrip):
 
 class LedManager:
     def __init__(self, num_leds, pin, base_color, brightness=50, reverse_direction=False):
-        self.cur_animation = None
+        self.animation_cb = None
         self.anim_start_time = 0
         self.anim_data = {}
         self.fade_start_time = None
@@ -96,7 +96,7 @@ class LedManager:
 
     def set_solid(self, r, g, b):
         with self.lock:
-            self.cur_animation = None
+            self.animation_cb = None
             color = Color(r, g, b)
             self.strip[:] = color
             self.strip.show()
@@ -104,7 +104,7 @@ class LedManager:
 
     def set_bar(self, ratio, r, g, b):
         with self.lock:
-            self.cur_animation = None
+            self.animation_cb = None
             num_lit = int(ratio * self.num_pixels)
             # One LED might not be fully lit to create a smoother effect
             partial_brightness = ratio * self.num_pixels - num_lit
@@ -123,17 +123,27 @@ class LedManager:
 
     def set_battery_bar(self, ratio):
         with self.lock:
-            self.cur_animation = None
+            self.animation_cb = None
             self._render_battery_bar(ratio)
             self.strip.show()
             logger.debug(f"Set battery bar: {ratio * 100}%")
 
     def start_animation(self, name, data=None):
         with self.lock:
-            if self.cur_animation != name:
+            animation_cb = None
+            match name:
+                case 'ready':
+                    animation_cb = self._pattern_ready_cb
+                case 'sync':
+                    animation_cb = self._pattern_sync_cb
+                case 'shutdown':
+                    animation_cb = self._pattern_shutdown_cb
+                case 'charging':
+                    animation_cb = self._pattern_charging_cb
+            if self.animation_cb != animation_cb:
                 # Only restart if different animation. Otherwise only update data.
                 self.anim_start_time = time.monotonic()
-            self.cur_animation = name
+            self.animation_cb = animation_cb
             self.anim_data = data or {}
             logger.info(f"Started animation: {name}")
 
@@ -145,23 +155,15 @@ class LedManager:
 
     def update_animation(self):
         with self.lock:
-            elapsed = time.monotonic() - self.anim_start_time
-
-            match self.cur_animation:
-                case 'ready':
-                    self._pattern_ready(elapsed)
-                case 'sync':
-                    self._pattern_sync(elapsed)
-                case 'shutdown':
-                    self._pattern_shutdown(elapsed)
-                case 'charging':
-                    self._pattern_charging(elapsed, self.anim_data.get('soc', 0))
+            if self.animation_cb is not None:
+                elapsed = time.monotonic() - self.anim_start_time
+                self.animation_cb(elapsed)
 
             self._fade()
 
             self.strip.show()
 
-    def _pattern_ready(self, elapsed):
+    def _pattern_ready_cb(self, elapsed):
         # First 1.5s: light up from center outwards. Then two quick pulses, ending at full brightness.
         center = self.num_pixels / 2.0
         if elapsed < 1.5:
@@ -185,7 +187,7 @@ class LedManager:
                 b = int(self.base_color.b * brightness)
                 self.strip[:] = Color(r, g, b)
 
-    def _pattern_sync(self, elapsed):
+    def _pattern_sync_cb(self, elapsed):
         # Moving dots (10% of pixels) from edges to center and back
         self.strip[:] = Color(0, 0, 0)
         period = 2.0
@@ -196,7 +198,8 @@ class LedManager:
         self.strip[start_idx:(start_idx + dot_width)] = self.base_color
         self.strip[(-start_idx - 1):(-start_idx - dot_width - 1): -1] = self.base_color
 
-    def _pattern_charging(self, elapsed, soc):
+    def _pattern_charging_cb(self, elapsed):
+        soc = self.anim_data.get('soc', 0)
         # Moving bar indicating charge level
         animation_period = 3.0
         total_period = animation_period + 1.0  # 1s constant at the end
@@ -211,7 +214,7 @@ class LedManager:
         self.strip.pixels[:num_lit] = self._battery_lookup[:num_lit]
         self.strip[num_lit:] = Color(0, 0, 0)
 
-    def _pattern_shutdown(self, elapsed):
+    def _pattern_shutdown_cb(self, elapsed):
         # Light down from edges to center. Leave 10% of pixels in the center on until power is cut
         duration = 2.0
         progress = min(elapsed / duration, 1.0)
@@ -224,7 +227,7 @@ class LedManager:
         self.strip[pattern_end:] = Color(0, 0, 0)
 
     def _fade(self):
-        if self.fade_start_time is None or self.fade_target_brightness is None:
+        if self.fade_start_time is None:
             return
 
         elapsed = time.monotonic() - self.fade_start_time
@@ -232,7 +235,6 @@ class LedManager:
         if elapsed >= duration:
             brightness = self.fade_target_brightness
             self.fade_start_time = None
-            self.fade_target_brightness = None
             logger.debug(f"Fade completed to brightness: {brightness}/255")
         else:
             offset = elapsed / duration * (self.fade_target_brightness - self.fade_start_brightness)
@@ -280,7 +282,7 @@ class MsgHandler():
             case 'start_animation':
                 self.led_mgr.start_animation(params.get('name'), params.get('data'))
             case 'stop_animation':
-                self.led_mgr.cur_animation = None
+                self.led_mgr.animation_cb = None
             case 'start_fade':
                 self.led_mgr.start_fade(int(params.get('brightness', 50) / 100 * 255))
             case 'ping':
