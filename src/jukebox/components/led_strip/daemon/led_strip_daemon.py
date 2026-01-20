@@ -144,8 +144,6 @@ class LedManager:
         logger.debug(f"Started fade to brightness: {target_brightness}/255")
 
     def update_animation(self):
-        if not self.cur_animation:
-            return
         with self.lock:
             elapsed = time.monotonic() - self.anim_start_time
 
