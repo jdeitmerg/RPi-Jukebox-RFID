@@ -33,7 +33,6 @@ The plugin exposes a **state-based LED interface** that other parts of Phoniebox
    - Static = stable / ready
    - Pulsing = waiting / ongoing
    - Moving = active process
-   - Blinking = warning or error
 
 3. **Overlays are temporary**
    - Volume and battery displays briefly override the base state
@@ -192,13 +191,3 @@ Night Mode affects all states.
 - The brightness is reduced to a configurable level.
 - The brightness is reduced based on the time of the day, with configurable beginnin and end.
 - The plugin exposes a function to toggle night mode manually, overwriting the state based on time of the day.
-
-## ToDo
-
-- Night mode
-- `invert_direction` configuration flag
-- Battery bar sections (red, yellow, green)
-- Battery alert
-- Test all states defined above
-- Implement proper interpolation for smooth patterns
-- Refactor priority scheme

@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-import time
-import zmq
+import argparse
+import grp
 import json
 import logging
-import threading
-import argparse
 import os
-import grp
+import threading
+import time
+
+import zmq
 from rpi_ws281x import Color, PixelStrip
 
 SOCKET_PATH = '/tmp/led_strip_daemon.sock'
+PIXELS_PER_LED = 20  # Good value for smooth animations, see VirtualPixelStrip class docstring for details
+ANIMATION_TIMEOUT_MS = 50  # 20 FPS
+IDLE_TIMEOUT_MS = 10000  # Update LEDs every 10s when idle to fix potential corruption
+FADE_DURATION = 2.0  # Brightness fade duration in seconds
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -67,6 +72,10 @@ class VirtualPixelStrip(PixelStrip):
         super().show()
 
 
+def clamp_ratio(ratio):
+    return max(0.0, min(1.0, ratio))
+
+
 class LedManager:
     def __init__(self, num_leds, pin, base_color, brightness=50, reverse_direction=False):
         self.animation_cb = None
@@ -76,7 +85,8 @@ class LedManager:
         self.fade_start_brightness = None
         self.fade_target_brightness = None
         self.lock = threading.Lock()
-        self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=20, reverse=reverse_direction)
+        self.strip = VirtualPixelStrip(num_leds, pin, brightness=brightness, pixels_per_led=PIXELS_PER_LED,
+                                       reverse=reverse_direction)
         self.num_pixels = len(self.strip)
         self.strip.begin()
         self.base_color = Color(base_color['r'], base_color['g'], base_color['b'])
@@ -94,6 +104,9 @@ class LedManager:
         remaining_pixels = self.num_pixels - len(self._battery_lookup)
         self._battery_lookup += [Color(0, 255, 0)] * remaining_pixels  # green up to 100%
 
+    def _clear(self) -> None:
+        self.strip[:] = Color(0, 0, 0)
+
     def set_solid(self, r, g, b):
         with self.lock:
             self.animation_cb = None
@@ -105,19 +118,13 @@ class LedManager:
     def set_bar(self, ratio, r, g, b):
         with self.lock:
             self.animation_cb = None
+            ratio = clamp_ratio(ratio)
             num_lit = int(ratio * self.num_pixels)
-            # One LED might not be fully lit to create a smoother effect
-            partial_brightness = ratio * self.num_pixels - num_lit
             color = Color(r, g, b)
-            for i in range(num_lit):
-                self.strip.setPixelColor(i, color)
+            if num_lit:
+                self.strip[:num_lit] = color
             if num_lit < self.num_pixels:
-                r_c = int(((color >> 16) & 0xFF) * partial_brightness)
-                g_c = int(((color >> 8) & 0xFF) * partial_brightness)
-                b_c = int((color & 0xFF) * partial_brightness)
-                self.strip.setPixelColor(num_lit, Color(r_c, g_c, b_c))
-            for i in range(num_lit + 1, self.num_pixels):
-                self.strip.setPixelColor(i, Color(0, 0, 0))
+                self.strip[num_lit:] = Color(0, 0, 0)
             self.strip.show()
             logger.debug(f"Set bar: {ratio * 100}%")
 
@@ -189,7 +196,7 @@ class LedManager:
 
     def _pattern_sync_cb(self, elapsed):
         # Moving dots (10% of pixels) from edges to center and back
-        self.strip[:] = Color(0, 0, 0)
+        self._clear()
         period = 2.0
         progress = (elapsed % period) / period
         dot_width = int(self.num_pixels * 0.1)
@@ -208,11 +215,13 @@ class LedManager:
         self._render_battery_bar(min(soc, progress))
 
     def _render_battery_bar(self, ratio):
-        ratio = max(0.0, min(1.0, ratio))
+        ratio = clamp_ratio(ratio)
         num_lit = int(ratio * self.num_pixels)
 
-        self.strip.pixels[:num_lit] = self._battery_lookup[:num_lit]
-        self.strip[num_lit:] = Color(0, 0, 0)
+        if num_lit:
+            self.strip.pixels[:num_lit] = self._battery_lookup[:num_lit]
+        if num_lit < self.num_pixels:
+            self.strip[num_lit:] = Color(0, 0, 0)
 
     def _pattern_shutdown_cb(self, elapsed):
         # Light down from edges to center. Leave 10% of pixels in the center on until power is cut
@@ -231,19 +240,18 @@ class LedManager:
             return
 
         elapsed = time.monotonic() - self.fade_start_time
-        duration = 2.0
-        if elapsed >= duration:
+        if elapsed >= FADE_DURATION:
             brightness = self.fade_target_brightness
             self.fade_start_time = None
             logger.debug(f"Fade completed to brightness: {brightness}/255")
         else:
-            offset = elapsed / duration * (self.fade_target_brightness - self.fade_start_brightness)
+            offset = elapsed / FADE_DURATION * (self.fade_target_brightness - self.fade_start_brightness)
             brightness = self.fade_start_brightness + offset
 
         self.strip.setBrightness(max(0, min(255, int(brightness))))
 
 
-class MsgHandler():
+class MsgHandler:
     def __init__(self, led_mgr):
         self.led_mgr = led_mgr
 
@@ -272,7 +280,7 @@ class MsgHandler():
         match method:
             case 'set_solid':
                 self.led_mgr.set_solid(params.get('r', 0), params.get('g', 0), params.get('b', 0))
-            case'set_bar':
+            case 'set_bar':
                 self.led_mgr.set_bar(params.get('ratio', 0),
                                      params.get('r', 255),
                                      params.get('g', 255),
@@ -300,10 +308,11 @@ class MsgHandler():
     def receive_and_process(self):
         # Adjust sleep time (via socket timeout) based on whether an animation is active
         if self.led_mgr.animation_active():
-            self.socket.setsockopt(zmq.RCVTIMEO, 50)  # 50ms timeout -> 20 FPS update rate
+            # Timeout determines the update rate during animations
+            self.socket.setsockopt(zmq.RCVTIMEO, ANIMATION_TIMEOUT_MS)
         else:
-            # 10s timeout when idle, only for updating LEDs in case they are corrupted
-            self.socket.setsockopt(zmq.RCVTIMEO, 10000)
+            # Larger timeout when idle, only for updating LEDs in case they are corrupted
+            self.socket.setsockopt(zmq.RCVTIMEO, IDLE_TIMEOUT_MS)
         try:
             message = self.socket.recv_string()
             request = json.loads(message)

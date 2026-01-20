@@ -1,9 +1,10 @@
 import logging
-import jukebox.plugs as plugin
-import jukebox.cfghandler
-from components.led_strip.led_strip_manager import LedStripManager
 import time
 from datetime import time as dtime
+
+import jukebox.cfghandler
+import jukebox.plugs as plugin
+from components.led_strip.led_strip_manager import LedStripManager
 
 logger = logging.getLogger('jb.led_strip')
 cfg = jukebox.cfghandler.get_handler('jukebox')
@@ -11,16 +12,12 @@ cfg = jukebox.cfghandler.get_handler('jukebox')
 led_strip_manager = None
 
 
-@plugin.initialize
-def initialize():
-    global led_strip_manager
-    logger.info("Initializing LED Strip Plugin (Proxy Mode)")
+def _parse_time(value: str) -> dtime:
+    return dtime.fromisoformat(value)
 
+
+def _load_config():
     enabled = cfg.setndefault('led_strip', 'enable', value=False)
-    if not enabled:
-        logger.info("LED Strip Plugin is disabled")
-        return
-
     num_leds = cfg.setndefault('led_strip', 'num_leds', value=16)
     pin = cfg.setndefault('led_strip', 'pin', value=12)
     brightness = cfg.setndefault('led_strip', 'brightness', value=50)
@@ -31,15 +28,33 @@ def initialize():
     nightmode_end = cfg.setndefault('led_strip', 'night_mode', 'end', value="07:00:00")
     nightmode_brightness = cfg.setndefault('led_strip', 'night_mode', 'brightness', value=5)
 
-    logger.debug(f"LED Strip Config - num_leds: {num_leds}, pin: {pin}, "
-                 f"brightness: {brightness}, base_color: {base_color}, reverse_direction: {reverse_direction}, "
-                 f"nightmode_enable: {nightmode_enable}, nightmode_start: {nightmode_start}, "
-                 f"nightmode_end: {nightmode_end}, nightmode_brightness: {nightmode_brightness}")
+    logger.debug(
+        "LED Strip Config - num_leds: %s, pin: %s, brightness: %s, base_color: %s, reverse_direction: %s, "
+        "nightmode_enable: %s, nightmode_start: %s, nightmode_end: %s, nightmode_brightness: %s",
+        num_leds, pin, brightness, base_color, reverse_direction, nightmode_enable,
+        nightmode_start, nightmode_end, nightmode_brightness,
+    )
 
     if nightmode_enable:
-        nightmode_times = (dtime.fromisoformat(nightmode_start), dtime.fromisoformat(nightmode_end))
+        nightmode_times = (_parse_time(nightmode_start), _parse_time(nightmode_end))
     else:
         nightmode_times = None
+
+    return (enabled, num_leds, pin, brightness, base_color, reverse_direction, nightmode_times,
+            nightmode_brightness)
+
+
+@plugin.initialize
+def initialize():
+    global led_strip_manager
+    logger.info("Initializing LED Strip Plugin (Proxy Mode)")
+
+    (enabled, num_leds, pin, brightness, base_color, reverse_direction,
+     nightmode_times, nightmode_brightness) = _load_config()
+
+    if not enabled:
+        logger.info("LED Strip Plugin is disabled")
+        return
 
     led_strip_manager = LedStripManager(num_leds, pin, brightness, tuple(base_color), reverse_direction, nightmode_times,
                                         nightmode_brightness)

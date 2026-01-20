@@ -1,20 +1,24 @@
+import json
+import logging
+import subprocess
 import threading
 import time
-import logging
+from datetime import datetime
 from enum import Enum
-import json
+
 import zmq
-import subprocess
-import jukebox.publishing.subscriber as subscriber
+
 import jukebox.cfghandler
 import jukebox.plugs as plugin
-from datetime import datetime
+import jukebox.publishing.subscriber as subscriber
 
 logger = logging.getLogger('jb.led_strip.manager')
 cfg = jukebox.cfghandler.get_handler('jukebox')
 
 DAEMON_DIR = __file__.replace('led_strip_manager.py', 'daemon')
 SOCKET_PATH = '/tmp/led_strip_daemon.sock'
+READY_DURATION = 3.0
+RPC_RETRY_ATTEMPTS = 20
 
 
 class LedState(Enum):
@@ -53,30 +57,19 @@ class LedStripManager(threading.Thread):
         self.num_leds = num_leds
         self.pin = pin
         self.base_color = dict(zip(['r', 'g', 'b'], base_color))
-        self.lock = threading.Lock()
+        self._lock = threading.Lock()
+        self.context = None
         self.daemon_socket = None
         self.reverse_direction = reverse_direction
-        self.ts_start = time.monotonic()
+        self.startup_ts = time.monotonic()
         self.nightmode_times = nightmode_times
         self.nightmode_brightness = nightmode_brightness
         self.daymode_brightness = brightness
         self.nightmode = self._is_night()
         self.brightness = nightmode_brightness if self.nightmode else brightness
 
-        with self.lock:
-            self._start_daemon()
-            # RPC Setup
-            self.context = zmq.Context()
-            for _ in range(20):
-                try:
-                    self._socket_connect()
-                    if self._poll_daemon():  # takes up to 500ms
-                        break
-                    time.sleep(0.5)
-                except Exception:
-                    pass
-            else:
-                raise RuntimeError('LED Daemon did not start properly!')
+        with self._lock:
+            self._connect_daemon()
         logger.info('Connected to LED Strip Daemon')
 
         # State tracking
@@ -84,13 +77,27 @@ class LedStripManager(threading.Thread):
         self.layer_data = {}
         # State ID and associated data that is currently being displayed. Daemon auto-initiates to idle, no need to send it.
         self.current_state = (LedState.IDLE, None)
-        self.overlay_timeout = 0
-        self.overlay_start_time = 0
+        self.overlay_timeout = 0.0
+        self.overlay_start_time = 0.0
 
         # Subscriptions
         self.sub = subscriber.Subscriber('inproc://PublisherToProxy', [
             'volume.level', 'sync.status', 'batt_status'
         ])
+
+    def _connect_daemon(self) -> None:
+        self._start_daemon()
+        # RPC Setup
+        self.context = zmq.Context()
+        for _ in range(RPC_RETRY_ATTEMPTS):
+            try:
+                self._socket_connect()
+                if self._poll_daemon():  # takes up to 500ms
+                    return
+                time.sleep(0.5)
+            except Exception:
+                pass
+        raise RuntimeError('LED Daemon did not start properly!')
 
     def _is_night(self):
         if not self.nightmode_times:
@@ -145,7 +152,7 @@ class LedStripManager(threading.Thread):
         self.daemon_socket.setsockopt(zmq.RCVTIMEO, 500)
 
     def _rpc_call(self, method, params=None):
-        with self.lock:
+        with self._lock:
             try:
                 self.daemon_socket.send_string(json.dumps({'method': method, 'params': params or {}}))
                 self.daemon_socket.recv_string()  # Wait for ack
@@ -153,13 +160,14 @@ class LedStripManager(threading.Thread):
                 logger.error(f'Failed to call LED daemon: {e}')
                 # Reconnect on error
                 self._socket_connect()
-                assert self._poll_daemon(), 'Unable to reconnect to LED daemon!'
+                if not self._poll_daemon():
+                    raise RuntimeError('Unable to reconnect to LED daemon!') from e
 
     def run(self):
         logger.info('LedStripManager started')
 
         # Trigger Ready animation
-        self.layers.add(LedState.READY)
+        self._set_layer(LedState.READY)
         self.overlay_start_time = time.monotonic()
 
         while self._keep_running:
@@ -172,10 +180,10 @@ class LedStripManager(threading.Thread):
             # Check timeouts for Ready and Overlays
             now = time.monotonic()
             if LedState.OVERLAY in self.layers and now - self.overlay_start_time > self.overlay_timeout:
-                self.layers.remove(LedState.OVERLAY)
+                self._clear_layer(LedState.OVERLAY)
 
-            if LedState.READY in self.layers and now - self.overlay_start_time > 3.0:
-                self.layers.remove(LedState.READY)
+            if LedState.READY in self.layers and now - self.overlay_start_time > READY_DURATION:
+                self._clear_layer(LedState.READY)
 
             self._update_nightmode()
 
@@ -185,8 +193,8 @@ class LedStripManager(threading.Thread):
         logger.debug(f'Received event on topic "{topic}": {payload}')
         match topic:
             case 'volume.level':
-                if time.monotonic() - self.ts_start < 10:
-                    # The volume is always set automatically on startup. Supress showing the volume bar.
+                if time.monotonic() - self.startup_ts < 10:
+                    # The volume is always set without user interaction on startup. Supress showing the volume bar.
                     logger.debug('Not displaying volume change right after startup')
                 else:
                     max_volume = plugin.call('volume', 'ctrl', 'get_soft_max_volume')
@@ -198,9 +206,19 @@ class LedStripManager(threading.Thread):
             case _:
                 logger.warning(f'Unhandled topic "{topic}" in LedStripManager')
 
-    def _trigger_overlay(self, type, value, duration):
-        self.layers.add(LedState.OVERLAY)
-        self.layer_data[LedState.OVERLAY] = {'type': type, 'value': value}
+    def _set_layer(self, layer, data=None):
+        self.layers.add(layer)
+        if data is not None:
+            self.layer_data[layer] = data
+        elif layer in self.layer_data:
+            del self.layer_data[layer]
+
+    def _clear_layer(self, layer):
+        self.layers.discard(layer)
+        self.layer_data.pop(layer, None)
+
+    def _trigger_overlay(self, overlay_type, value, duration):
+        self._set_layer(LedState.OVERLAY, {'type': overlay_type, 'value': value})
         self.overlay_timeout = duration
         self.overlay_start_time = time.monotonic()
         # Immediately update daemon to show overlay, as this can be called from outside the run() loop
@@ -212,25 +230,23 @@ class LedStripManager(threading.Thread):
         charging = payload.get('charging', 0)
         full = soc >= .99
 
-        self.layers.discard(LedState.BATT_WARNING)
-        self.layers.discard(LedState.CHARGING)
-        self.layers.discard(LedState.FULL)
+        self._clear_layer(LedState.BATT_WARNING)
+        self._clear_layer(LedState.CHARGING)
+        self._clear_layer(LedState.FULL)
 
         if warning:
-            self.layers.add(LedState.BATT_WARNING)
-            self.layer_data[LedState.BATT_WARNING] = {'soc': soc}
+            self._set_layer(LedState.BATT_WARNING, {'soc': soc})
         elif full:
-            self.layers.add(LedState.FULL)
+            self._set_layer(LedState.FULL)
         elif charging:
-            self.layers.add(LedState.CHARGING)
-            self.layer_data[LedState.CHARGING] = {'soc': soc}
+            self._set_layer(LedState.CHARGING, {'soc': soc})
 
     def _handle_sync(self, payload):
         active = payload.get('active', False)
         if active:
-            self.layers.add(LedState.SYNC)
+            self._set_layer(LedState.SYNC)
         else:
-            self.layers.discard(LedState.SYNC)
+            self._clear_layer(LedState.SYNC)
 
     def _update_daemon_state(self):
         show_state = max(self.layers, key=lambda s: s.value)
@@ -265,7 +281,7 @@ class LedStripManager(threading.Thread):
         self.current_state = (show_state, show_state_data)
 
     def trigger_shutdown(self):
-        self.layers.add(LedState.SHUTDOWN)
+        self._set_layer(LedState.SHUTDOWN)
         # Immediately update daemon to show animation, as this can be called from outside the run() loop
         self._update_daemon_state()
 
@@ -276,5 +292,7 @@ class LedStripManager(threading.Thread):
             # Can't use terminate(), as sudo was used to start the process, which creates a new process group.
             self._rpc_call('exit')
             # Don't wait for process to exit so we're not killed waiting. Better to let it shut down at its own pace.
-        self.daemon_socket.close()
-        self.context.term()
+        if self.daemon_socket:
+            self.daemon_socket.close()
+        if self.context is not None:
+            self.context.term()
