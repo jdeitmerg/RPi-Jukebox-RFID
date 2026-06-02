@@ -45,7 +45,7 @@ The plugin exposes a **state-based LED interface** that other parts of Phoniebox
 
 - Addressable RGB LEDs (e.g. WS2812 / NeoPixel)
 - Any length (recommended: 8–16 LEDs)
-- Linear layout, left → right
+- Linear layout
 - Brightness globally configurable
 - Connected to pin supporting PWM (GPIO 12, 13, 18 or 19)
 
@@ -157,12 +157,12 @@ The plugin logic scales automatically with LED count. It supports the LED strip 
 From highest to lowest priority:
 
 1. Shutdown
-6. Ready animation after booting
-5. Temporary overlays (volume, battery when manually triggered)
-1. Critical battery warning
-4. Sync animations
-2. Charging, charging complete
-6. Idle / kid color
+2. Ready animation after booting
+3. Temporary overlays (volume, battery when manually triggered)
+4. Critical battery warning
+5. Sync animations
+6. Charging, charging complete
+7. Idle / kid color
 
 Higher-priority states override lower ones.
 
@@ -178,6 +178,49 @@ Higher-priority states override lower ones.
 - Brightness should be globally configurable
 - Basic gamma correction should be used to keep perceived colors constants with varying brightness
 
+## Service architecture
+
+The LED strip is split into two processes:
+
+- `led-strip-daemon.service` is a system service running as `root`.
+- `jukebox-daemon.service` remains a user service and talks to the LED strip daemon over ZeroMQ IPC.
+
+This split is required because the `rpi_ws281x` library needs root access for the GPIO/PWM hardware, while the main
+Jukebox daemon intentionally runs as the normal jukebox user.
+
+### Startup and configuration flow
+
+1. systemd starts `led-strip-daemon.service` during boot.
+2. The root daemon creates the IPC socket at `/run/jukebox/led_strip_daemon.sock`.
+3. The socket is owned by `root` and made writable for the jukebox user's group.
+4. The LED daemon waits without touching the LED hardware until it receives a `configure` RPC call.
+5. When the LED plugin initializes inside `jukebox-daemon`, it connects to the socket and sends the LED settings from
+   `shared/settings/jukebox.yaml`.
+6. After configuration, `jukebox-daemon` sends state commands such as `set_solid`, `set_bar`, `set_battery`,
+   `start_animation`, and `start_fade`.
+
+`jukebox-daemon` does not start the LED daemon with `sudo` and does not stop the root service during shutdown. On
+shutdown it only sends the shutdown animation and closes its IPC connection; systemd owns the root daemon lifecycle.
+
+### systemd units
+
+The installer registers both services:
+
+- `/usr/lib/systemd/user/jukebox-daemon.service`
+- `/etc/systemd/system/led-strip-daemon.service`
+
+Useful commands:
+
+```bash
+systemctl status led-strip-daemon.service
+systemctl restart led-strip-daemon.service
+systemctl --user status jukebox-daemon.service
+systemctl --user restart jukebox-daemon.service
+```
+
+If the LED service is restarted while `jukebox-daemon` is running, the manager reconnects on the next LED command and
+sends the current LED configuration again before resuming state updates.
+
 ## Night Mode
 
 Night Mode reduces visual distraction in dark environments (e.g. bedtime listening) while keeping all system feedback functional.
@@ -189,5 +232,5 @@ Night Mode affects all states.
 ### Behavior
 
 - The brightness is reduced to a configurable level.
-- The brightness is reduced based on the time of the day, with configurable beginnin and end.
+- The brightness is reduced based on the time of the day, with configurable beginning and end.
 - The plugin exposes a function to toggle night mode manually, overwriting the state based on time of the day.

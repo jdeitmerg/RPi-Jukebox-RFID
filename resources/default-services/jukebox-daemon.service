@@ -14,7 +14,10 @@ WorkingDirectory=%%INSTALLATION_PATH%%
 ExecStart=/bin/bash -c '%%INSTALLATION_PATH%%/run_jukebox.sh'
 StandardOutput=inherit
 StandardError=inherit
-Restart=always
+Restart=on-failure
+# Give the daemon more time to stop cleanly during shutdown
+TimeoutStopSec=15s
+KillMode=mixed
 # ConditionUser=!root
 
 #  One of these sandbox settings prevents using sudo shutdown from inside the service

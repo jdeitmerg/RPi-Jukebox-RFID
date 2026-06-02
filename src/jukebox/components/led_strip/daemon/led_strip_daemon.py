@@ -6,11 +6,12 @@ import logging
 import os
 import threading
 import time
-
 import zmq
 from rpi_ws281x import Color, PixelStrip
 
-SOCKET_PATH = '/tmp/led_strip_daemon.sock'
+SOCKET_PATH = '/run/jukebox/led_strip_daemon.sock'
+SOCKET_GROUP_ENV = 'JUKEBOX_LED_STRIP_GROUP'
+DEFAULT_SOCKET_GROUP = 'users'
 PIXELS_PER_LED = 20  # Good value for smooth animations, see VirtualPixelStrip class docstring for details
 ANIMATION_TIMEOUT_MS = 50  # 20 FPS
 IDLE_TIMEOUT_MS = 10000  # Update LEDs every 10s when idle to fix potential corruption
@@ -252,15 +253,20 @@ class LedManager:
 
 
 class MsgHandler:
-    def __init__(self, led_mgr):
-        self.led_mgr = led_mgr
+    def __init__(self, socket_group):
+        self.led_mgr = None
+        self.socket_group = socket_group
 
     def __enter__(self):
+        socket_dir = os.path.dirname(SOCKET_PATH)
+        os.makedirs(socket_dir, exist_ok=True)
+        if os.path.exists(SOCKET_PATH):
+            os.unlink(SOCKET_PATH)
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)
         self.socket.bind(f'ipc://{SOCKET_PATH}')
-        # Make sure users other than root can access the newly created socket
-        group = grp.getgrnam('users').gr_gid
+        # Make sure jukebox-daemon can access the newly created socket.
+        group = grp.getgrnam(self.socket_group).gr_gid
         os.chown(SOCKET_PATH, 0, group)  # 0 is root uid
         os.chmod(SOCKET_PATH, 0o660)     # Ensure it's readable/writable by the group
         return self
@@ -269,6 +275,26 @@ class MsgHandler:
         self.socket.close()
         self.context.term()
 
+    def _configure(self, params):
+        base_color = params.get('base_color', {'r': 255, 'g': 255, 'b': 255})
+        if isinstance(base_color, list):
+            base_color = dict(zip(['r', 'g', 'b'], base_color))
+
+        self.led_mgr = LedManager(
+            num_leds=int(params.get('num_leds', 16)),
+            pin=int(params.get('pin', 12)),
+            brightness=int(int(params.get('brightness', 20)) / 100 * 255),
+            base_color={
+                'r': int(base_color.get('r', 255)),
+                'g': int(base_color.get('g', 255)),
+                'b': int(base_color.get('b', 255)),
+            },
+            reverse_direction=bool(params.get('reverse_direction', False))
+        )
+
+    def _requires_configuration(self, method):
+        return method not in {'configure', 'ping'}
+
     def _process_request(self, request):
         logger.debug(f"Received request: {request}")
         method = request.get('method')
@@ -276,38 +302,39 @@ class MsgHandler:
 
         logger.info(f"Processing method: {method} with params: {params}")
 
-        do_exit = False
-        match method:
-            case 'set_solid':
-                self.led_mgr.set_solid(params.get('r', 0), params.get('g', 0), params.get('b', 0))
-            case 'set_bar':
-                self.led_mgr.set_bar(params.get('ratio', 0),
-                                     params.get('r', 255),
-                                     params.get('g', 255),
-                                     params.get('b', 255))
-            case 'set_battery':
-                self.led_mgr.set_battery_bar(params.get('ratio', 0))
-            case 'start_animation':
-                self.led_mgr.start_animation(params.get('name'), params.get('data'))
-            case 'stop_animation':
-                self.led_mgr.animation_cb = None
-            case 'start_fade':
-                self.led_mgr.start_fade(int(params.get('brightness', 50) / 100 * 255))
-            case 'ping':
-                pass  # Just respond with 'ok'
-            case 'exit':
-                logger.info("Shutting down LED Daemon as per request")
-                do_exit = True
-            case _:
-                logger.warning(f"Unknown method: {method}")
+        if self.led_mgr is None and self._requires_configuration(method):
+            logger.warning(f"LED Daemon is not configured yet, ignoring method: {method}")
+        else:
+            match method:
+                case 'configure':
+                    self._configure(params)
+                case 'set_solid':
+                    self.led_mgr.set_solid(params.get('r', 0), params.get('g', 0), params.get('b', 0))
+                case 'set_bar':
+                    self.led_mgr.set_bar(params.get('ratio', 0),
+                                         params.get('r', 255),
+                                         params.get('g', 255),
+                                         params.get('b', 255))
+                case 'set_battery':
+                    self.led_mgr.set_battery_bar(params.get('ratio', 0))
+                case 'start_animation':
+                    self.led_mgr.start_animation(params.get('name'), params.get('data'))
+                case 'stop_animation':
+                    self.led_mgr.animation_cb = None
+                case 'start_fade':
+                    self.led_mgr.start_fade(int(params.get('brightness', 50) / 100 * 255))
+                case 'ping':
+                    pass  # Just respond with 'ok'
+                case 'exit':
+                    logger.info("Ignoring exit request; systemd owns the LED daemon lifecycle")
+                case _:
+                    logger.warning(f"Unknown method: {method}")
 
         self.socket.send_string(json.dumps({'status': 'ok'}))
-        if do_exit:
-            exit(0)
 
     def receive_and_process(self):
         # Adjust sleep time (via socket timeout) based on whether an animation is active
-        if self.led_mgr.animation_active():
+        if self.led_mgr and self.led_mgr.animation_active():
             # Timeout determines the update rate during animations
             self.socket.setsockopt(zmq.RCVTIMEO, ANIMATION_TIMEOUT_MS)
         else:
@@ -319,28 +346,18 @@ class MsgHandler:
             self._process_request(request)
         except zmq.Again:
             pass  # No request received
-        self.led_mgr.update_animation()
+        if self.led_mgr:
+            self.led_mgr.update_animation()
 
 
 def main():
     parser = argparse.ArgumentParser(description="LED Strip Daemon")
-    parser.add_argument("--pin", type=int, default=12, help="GPIO pin to which the LED strip is connected")
-    parser.add_argument("--num-leds", type=int, default=16, help="Number of LEDs in the strip")
-    parser.add_argument("--brightness", type=int, default=20, help="Brightness of the LED strip (0-100)")
-    parser.add_argument("--base-color", type=str, default="255,255,255", help="Base color in R,G,B format")
-    parser.add_argument("--reverse_direction", action='store_true', help="Reverses the direction of all patterns")
+    parser.add_argument("--socket-group", default=os.environ.get(SOCKET_GROUP_ENV, DEFAULT_SOCKET_GROUP),
+                        help="Group allowed to access the IPC socket")
     args = parser.parse_args()
 
-    led_mgr = LedManager(
-        num_leds=args.num_leds,
-        pin=args.pin,
-        brightness=int(args.brightness / 100 * 255),
-        base_color=dict(zip(['r', 'g', 'b'], map(int, args.base_color.split(',')))),
-        reverse_direction=args.reverse_direction
-    )
-
-    with MsgHandler(led_mgr) as handler:
-        logger.info("LED Daemon listening on IPC socket")
+    with MsgHandler(args.socket_group) as handler:
+        logger.info(f"LED Daemon listening on IPC socket {SOCKET_PATH}")
         while True:
             handler.receive_and_process()
             # Handler takes care of timing via socket timeout, no need to sleep here

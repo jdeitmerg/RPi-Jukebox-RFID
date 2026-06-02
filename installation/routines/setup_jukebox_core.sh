@@ -7,6 +7,7 @@ JUKEBOX_ZMQ_VERSION="4.3.5"
 
 JUKEBOX_PULSE_CONFIG="${HOME_PATH}"/.config/pulse/default.pa
 JUKEBOX_SERVICE_NAME="${SYSTEMD_USR_PATH}/jukebox-daemon.service"
+LED_STRIP_SERVICE_NAME="${SYSTEMD_PATH}/led-strip-daemon.service"
 
 # Functions
 _jukebox_core_install_os_dependencies() {
@@ -127,6 +128,16 @@ _jukebox_core_register_as_service() {
 
   sudo -u "${CURRENT_USER}" systemctl --user daemon-reload
   sudo -u "${CURRENT_USER}" systemctl --user enable jukebox-daemon.service
+
+  print_lc "  Register LED Strip root service"
+
+  sudo cp -f "${INSTALLATION_PATH}/resources/default-services/led-strip-daemon.service" "${LED_STRIP_SERVICE_NAME}"
+  sudo sed -i "s|%%INSTALLATION_PATH%%|${INSTALLATION_PATH}|g" "${LED_STRIP_SERVICE_NAME}"
+  sudo sed -i "s|%%CURRENT_USER_GROUP%%|${CURRENT_USER_GROUP}|g" "${LED_STRIP_SERVICE_NAME}"
+  sudo chmod 644 "${LED_STRIP_SERVICE_NAME}"
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable led-strip-daemon.service
 }
 
 _jukebox_core_set_owner() {
@@ -168,10 +179,13 @@ _jukebox_core_check() {
     verify_files_chmod_chown 644 "${CURRENT_USER}" "${CURRENT_USER_GROUP}" "${SETTINGS_PATH}/logger.yaml"
 
     verify_files_chmod_chown 644 root root "${SYSTEMD_USR_PATH}/jukebox-daemon.service"
+    verify_files_chmod_chown 644 root root "${LED_STRIP_SERVICE_NAME}"
 
     verify_file_contains_string "${INSTALLATION_PATH}" "${JUKEBOX_SERVICE_NAME}"
+    verify_file_contains_string "${INSTALLATION_PATH}" "${LED_STRIP_SERVICE_NAME}"
 
     verify_service_enablement jukebox-daemon.service enabled -M "${CURRENT_USER}"@ --user
+    verify_service_enablement led-strip-daemon.service enabled
 }
 
 _run_setup_jukebox_core() {

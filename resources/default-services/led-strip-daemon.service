@@ -1,0 +1,19 @@
+[Unit]
+Description=Jukebox LED Strip Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=%%CURRENT_USER_GROUP%%
+WorkingDirectory=%%INSTALLATION_PATH%%/src/jukebox/components/led_strip/daemon
+Environment=JUKEBOX_LED_STRIP_GROUP=%%CURRENT_USER_GROUP%%
+ExecStart=/bin/bash -c '%%INSTALLATION_PATH%%/src/jukebox/components/led_strip/daemon/run_daemon.sh'
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RuntimeDirectory=jukebox
+RuntimeDirectoryMode=0775
+
+[Install]
+WantedBy=multi-user.target

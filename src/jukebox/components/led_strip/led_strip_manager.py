@@ -1,6 +1,5 @@
 import json
 import logging
-import subprocess
 import threading
 import time
 from datetime import datetime
@@ -15,8 +14,7 @@ import jukebox.publishing.subscriber as subscriber
 logger = logging.getLogger('jb.led_strip.manager')
 cfg = jukebox.cfghandler.get_handler('jukebox')
 
-DAEMON_DIR = __file__.replace('led_strip_manager.py', 'daemon')
-SOCKET_PATH = '/tmp/led_strip_daemon.sock'
+SOCKET_PATH = '/run/jukebox/led_strip_daemon.sock'
 READY_DURATION = 3.0
 RPC_RETRY_ATTEMPTS = 20
 
@@ -36,7 +34,7 @@ class LedState(Enum):
 class LedStripManager(threading.Thread):
     def __init__(self, num_leds=16, pin=12, brightness=20, base_color=(255, 255, 255), reverse_direction=False,
                  nightmode_times=None, nightmode_brightness=5):
-        ''' Manages the LED strip daemon process and communicates with it via RPC.
+        ''' Communicates with the root LED strip daemon via RPC.
         Args:
             num_leds (int): Number of LEDs in the strip.
             pin (int): GPIO pin connected to the LED strip.
@@ -53,11 +51,10 @@ class LedStripManager(threading.Thread):
                      f'nightmode_times={nightmode_times}, nightmode_brightness={nightmode_brightness}')
         super().__init__(name='LedStripManager')
         self._keep_running = True
-        self.daemon_proc = None
         self.num_leds = num_leds
         self.pin = pin
         self.base_color = dict(zip(['r', 'g', 'b'], base_color))
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.context = None
         self.daemon_socket = None
         self.reverse_direction = reverse_direction
@@ -86,13 +83,13 @@ class LedStripManager(threading.Thread):
         ])
 
     def _connect_daemon(self) -> None:
-        self._start_daemon()
         # RPC Setup
         self.context = zmq.Context()
         for _ in range(RPC_RETRY_ATTEMPTS):
             try:
                 self._socket_connect()
                 if self._poll_daemon():  # takes up to 500ms
+                    self._configure_daemon()
                     return
                 time.sleep(0.5)
             except Exception:
@@ -116,21 +113,17 @@ class LedStripManager(threading.Thread):
             logger.info(f'Night mode {"enabled" if nightmode else "disabled"}, fading brightness to {self.brightness}')
             self._rpc_call('start_fade', {'brightness': self.brightness})
 
-    def _start_daemon(self):
-        args = ['sudo', f'{DAEMON_DIR}/run_daemon.sh',
-                '--num-leds', str(self.num_leds),
-                '--pin', str(self.pin),
-                '--brightness', str(self.brightness),
-                '--base-color', ','.join(str(v) for v in self.base_color.values())]
-        if self.reverse_direction:
-            args.append('--reverse_direction')
-        self.daemon_proc = subprocess.Popen(args,
-                                            stdout=subprocess.DEVNULL,  # Suppress output to avoid cluttering logs
-                                            stderr=subprocess.DEVNULL,
-                                            # start_new_session makes sure the process is not killed immediately when the
-                                            # main app receives SIGINT/SIGTERM. It also stops the log from getting messed up
-                                            # (looking like carriage return missing on Windows).
-                                            start_new_session=True)
+    def _daemon_config(self):
+        return {
+            'num_leds': self.num_leds,
+            'pin': self.pin,
+            'brightness': self.brightness,
+            'base_color': self.base_color,
+            'reverse_direction': self.reverse_direction,
+        }
+
+    def _configure_daemon(self):
+        self._send_rpc_once('configure', self._daemon_config())
 
     def _poll_daemon(self):
         # Check if daemon is running
@@ -151,17 +144,23 @@ class LedStripManager(threading.Thread):
         self.daemon_socket.setsockopt(zmq.LINGER, 500)
         self.daemon_socket.setsockopt(zmq.RCVTIMEO, 500)
 
+    def _send_rpc_once(self, method, params=None):
+        self.daemon_socket.send_string(json.dumps({'method': method, 'params': params or {}}))
+        self.daemon_socket.recv_string()  # Wait for ack
+
     def _rpc_call(self, method, params=None):
         with self._lock:
             try:
-                self.daemon_socket.send_string(json.dumps({'method': method, 'params': params or {}}))
-                self.daemon_socket.recv_string()  # Wait for ack
+                self._send_rpc_once(method, params)
             except Exception as e:
                 logger.error(f'Failed to call LED daemon: {e}')
                 # Reconnect on error
                 self._socket_connect()
                 if not self._poll_daemon():
                     raise RuntimeError('Unable to reconnect to LED daemon!') from e
+                self._configure_daemon()
+                if method != 'configure':
+                    self._send_rpc_once(method, params)
 
     def run(self):
         logger.info('LedStripManager started')
@@ -287,11 +286,6 @@ class LedStripManager(threading.Thread):
 
     def stop(self):
         self._keep_running = False
-        if self.daemon_proc:
-            logger.debug('Requesting LED daemon shutdown')
-            # Can't use terminate(), as sudo was used to start the process, which creates a new process group.
-            self._rpc_call('exit')
-            # Don't wait for process to exit so we're not killed waiting. Better to let it shut down at its own pace.
         if self.daemon_socket:
             self.daemon_socket.close()
         if self.context is not None:
